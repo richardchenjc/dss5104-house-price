@@ -4,8 +4,6 @@ Generates house_price_report.pdf in academic journal style.
 Run after analysis.py (requires results.json and figures/).
 """
 import json, os
-
-os.chdir(os.path.dirname(__file__) or '.')
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -53,17 +51,17 @@ AUTHORS = sty('AUTHORS', 'Normal', fontSize=10, textColor=DGREY,
 DATE_S  = sty('DATE_S',  'Normal', fontSize=9,  textColor=DGREY,
                spaceAfter=0, alignment=TA_CENTER)
 ABSTRACT= sty('ABSTRACT','Normal', fontSize=9,  textColor=BLACK,
-               leading=13, leftIndent=1.2*cm, rightIndent=1.2*cm,
-               spaceAfter=6, alignment=TA_JUSTIFY)
+               leading=12, leftIndent=0.8*cm, rightIndent=0.8*cm,
+               spaceAfter=4, alignment=TA_JUSTIFY)
 ABS_HDR = sty('ABS_HDR', 'Normal', fontSize=9,  textColor=NAVY,
                fontName='Helvetica-Bold', spaceAfter=3, alignment=TA_CENTER)
 H1      = sty('H1', 'Heading1', fontSize=11, textColor=NAVY,
-               fontName='Helvetica-Bold', spaceBefore=10, spaceAfter=3,
+               fontName='Helvetica-Bold', spaceBefore=8, spaceAfter=3,
                borderPad=0)
 H2      = sty('H2', 'Heading2', fontSize=10, textColor=BLUE,
-               fontName='Helvetica-Bold', spaceBefore=6, spaceAfter=2)
-BODY    = sty('BODY',   'Normal', fontSize=9.5, leading=14.5,
-               spaceAfter=6, alignment=TA_JUSTIFY, textColor=BLACK)
+               fontName='Helvetica-Bold', spaceBefore=5, spaceAfter=2)
+BODY    = sty('BODY',   'Normal', fontSize=9.5, leading=13.5,
+               spaceAfter=4, alignment=TA_JUSTIFY, textColor=BLACK)
 CAPTION = sty('CAPTION','Normal', fontSize=8,   leading=11,
                spaceAfter=4, alignment=TA_CENTER, textColor=DGREY,
                fontName='Helvetica-Oblique')
@@ -135,11 +133,11 @@ def two_col_fig(p1, p2, w=7.8, c1=None, c2=None):
 story = []
 
 # ── Title block ───────────────────────────────────────────────────
-story += [SP(0.8)]
+story += [SP(0.3)]
 story.append(P('House Price Prediction with Linear Models', TITLE))
 story.append(P('DSS5104 — Applied Linear Regression · Continuous Assessment 1', SUBTITLE))
 story.append(P('March 2026', DATE_S))
-story += [SP(0.5), HR(), SP(0.2)]
+story += [SP(0.2), HR(), SP(0.1)]
 
 # ── Abstract ──────────────────────────────────────────────────────
 story.append(P('Abstract', ABS_HDR))
@@ -160,7 +158,7 @@ story.append(P(
     'feature design is more valuable than feature proliferation.',
     ABSTRACT
 ))
-story += [SP(0.2), HR(), SP(0.3)]
+story += [SP(0.1), HR(), SP(0.2)]
 
 # ══════════════════════════════════════════════════════════════════
 # 1. INTRODUCTION
@@ -221,21 +219,14 @@ story.append(P(
     'artificial copy. Five independent checks confirmed this was not legitimate '
     'resale activity:'
 ))
-story += [
-    B('All duplicate pairs share the <i>identical sale date</i>, ruling out resales across different time periods.'),
-    B('Zero pairs exhibit any difference in sale price, ruling out renegotiations.'),
-    B('Every duplicate appears at a consistent row offset of exactly 4,551 positions — precisely half the dataset — indicating programmatic origin.'),
-    B('9,098 rows are byte-for-byte identical including date; only 2 rows differ (a single sqft_living transcription discrepancy).'),
-    B('Under a naive random 80/20 split, 81% of test-set properties had their twin in the training set, directly inflating held-out performance.'),
-]
-story.append(SP(0.2))
 story.append(P(
-    'After deduplication, 4,553 unique sales remain. The impact on reported MAPEs '
-    'was asymmetric: linear models were minimally affected (less than 0.8 pp) '
-    'because they cannot memorise individual records. Gradient boosting models, '
-    'however, showed a 3–4 pp inflation — they had effectively memorised each '
-    'property\'s duplicate twin. All results reported in this paper use the '
-    'deduplicated dataset.'
+    'Five independent checks confirm the copies are artificial (Table 1): '
+    'all pairs share an <i>identical sale date</i> and zero price difference, ruling out resales; '
+    'duplicates appear at a fixed row offset of 4,551 (exactly half the dataset); '
+    '9,098 rows are byte-for-byte identical; and under an 80/20 split, 81% of test properties '
+    'had their twin in training, directly inflating held-out scores. '
+    'After deduplication, 4,553 unique sales remain. Linear models were minimally affected '
+    '(less than 0.8 pp); gradient boosting showed 3–4 pp inflation from memorisation.'
 ))
 
 dup_data = [
@@ -250,7 +241,35 @@ story.append(make_table(dup_data, [3.8*cm, 7.2*cm, 4.2*cm]))
 story.append(Cap('Table 1. Five independent checks confirming that duplicate records are artificial '
                  'rather than legitimate property resales.'))
 
-story.append(numbered_subsection('2.3', 'Train/Test Split'))
+story.append(numbered_subsection('2.3', 'Renovation Date Integrity'))
+story.append(P(
+    'A further data quality issue was identified in the <i>yr_renovated</i> field. '
+    'Of the 3,690 rows recording a renovation year, <b>386 have a renovation date '
+    'earlier than the construction date</b> — a logical impossibility. '
+    'Inspection of the patterns reveals these are systematic data entry errors, '
+    'not genuine anomalies:'
+))
+story.append(P(
+    'Four error patterns emerge (Table 2): 184 cases with yr_built = 2004, yr_renovated = 2003 '
+    '(likely pre-completion permits); 110 cases with yr_built = 2013, yr_renovated = 1923 '
+    'and 66 cases with yr_built = 2012, yr_renovated = 1912 '
+    '(confirmed century-digit typos — impossible in a 2014 dataset); '
+    'and 24 cases with yr_built = 1966, yr_renovated = 1963 (plausible prior-structure work). '
+    'All 386 rows are treated as having no valid renovation: <i>effective_age</i> falls back to '
+    '<i>yr_built</i> and <i>recent_reno</i> is set to zero.'
+))
+story.append(SP(0.05))
+reno_data = [
+    ['Pattern', 'Count', 'yr_built', 'yr_renovated', 'Gap', 'Treatment'],
+    ['Pre-completion', '184', '2004', '2003', '1 yr',   'Treated as no valid renovation'],
+    ['Century typo',   '66',  '2012', '1912', '100 yr', 'Confirmed entry error — excluded'],
+    ['Century typo',   '110', '2013', '1923', '90 yr',  'Confirmed entry error — excluded'],
+    ['Prior structure','24',  '1966', '1963', '3 yr',   'Treated as no valid renovation'],
+]
+story.append(make_table(reno_data, [3.2*cm, 1.4*cm, 2.0*cm, 3.0*cm, 1.6*cm, 4.0*cm]))
+story.append(Cap('Table 2. Renovation date anomalies. All 386 cases treated as missing renovation records.'))
+
+story.append(numbered_subsection('2.4', 'Train/Test Split'))
 story.append(P(
     'A fixed 80/20 random split (seed = 42) yields 3,642 training and 911 test '
     'observations. All data-dependent transformations — target encodings, '
@@ -336,10 +355,35 @@ story.append(P(
     'global mean using a smoothing strength of 30, preventing overfitting on '
     'sparsely observed categories:'
 ))
-story.append(P(
-    'enc(c) = [n(c) · mean(c) + 30 · global_mean] / [n(c) + 30]',
-    sty('EQ', 'Normal', fontSize=9.5, leftIndent=2*cm, spaceAfter=6,
-        fontName='Courier', textColor=NAVY)
+# Equation rendered as a centred shaded box
+_eq_text = Paragraph(
+    'enc(<i>c</i>) = '
+    '[ <i>n</i>(<i>c</i>) · <i>mean</i>(<i>c</i>) + 30 · <i>global_mean</i> ]'
+    ' / '
+    '[ <i>n</i>(<i>c</i>) + 30 ]',
+    sty('EQ2', 'Normal', fontSize=10, fontName='Helvetica', textColor=NAVY,
+        alignment=1, leading=16, spaceAfter=0, spaceBefore=0)
+)
+_eq_table = Table([[_eq_text]], colWidths=[12*cm])
+_eq_table.setStyle(TableStyle([
+    ('BACKGROUND',    (0,0), (-1,-1), HexColor('#eef3f9')),
+    ('BOX',           (0,0), (-1,-1), 0.8, BLUE),
+    ('TOPPADDING',    (0,0), (-1,-1), 10),
+    ('BOTTOMPADDING', (0,0), (-1,-1), 10),
+    ('LEFTPADDING',   (0,0), (-1,-1), 16),
+    ('RIGHTPADDING',  (0,0), (-1,-1), 16),
+    ('ALIGN',         (0,0), (-1,-1), 'CENTER'),
+    ('VALIGN',        (0,0), (-1,-1), 'MIDDLE'),
+]))
+story.append(Table(
+    [[_eq_table]],
+    colWidths=[16*cm],
+    style=TableStyle([
+        ('ALIGN',   (0,0), (-1,-1), 'CENTER'),
+        ('VALIGN',  (0,0), (-1,-1), 'MIDDLE'),
+        ('TOPPADDING',    (0,0), (-1,-1), 6),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 6),
+    ])
 ))
 story.append(P(
     'All encodings are fitted on training data only and re-computed inside each '
@@ -356,11 +400,12 @@ story.append(P(
     '<i>log_house_age</i> = log(year_sold − yr_built + 1) compresses the '
     'right tail of the age distribution while preserving the U-shaped price '
     'curve identified in Section 3. <i>effective_age</i> = year_sold − '
-    'max(yr_built, yr_renovated) uses renovation year where available, '
-    'capturing the functional age of the property rather than its '
-    'chronological age. <i>recent_reno</i> is a binary indicator for '
-    'renovation within 10 years of sale, encoding the "move-in ready" '
-    'premium observed in the market.'
+    'yr_reno_fill uses the renovation year where a <i>valid</i> renovation '
+    'exists (i.e. yr_renovated ≥ yr_built), otherwise falling back to yr_built. '
+    'This guard excludes the 386 erroneous entries identified in Section 2.3. '
+    '<i>recent_reno</i> is a binary indicator for renovation within 10 years '
+    'of sale, encoding the "move-in ready" premium observed in the market; '
+    'it is also set to zero for all invalid renovation records.'
 ))
 
 story.append(numbered_subsection('4.4', 'Condition and Interaction Features'))
@@ -413,7 +458,7 @@ feat_tbl = [
     [_c('Time (1)'),        _c('month_sold'),                                            _c('Seasonal variation within the 70-day transaction window')],
 ]
 story.append(make_table(feat_tbl, [2.5*cm, 5.5*cm, 8.0*cm], fs=8.5))
-story.append(Cap('Table 2. The 20 features comprising the lean primary model, organised by group. '
+story.append(Cap('Table 3. The 20 features comprising the lean primary model, organised by group. '
                  'All location encodings are fitted on training data and re-fitted per CV fold.'))
 
 # ══════════════════════════════════════════════════════════════════
@@ -511,39 +556,48 @@ story.append(P(
 story.append(numbered_section(6, 'Results'))
 
 res_data = [
-    ['Model', 'Features', 'CV MAPE', 'Train MAPE', 'Test MAPE', 'Gap'],
-    ['Lean Ridge (primary)',        f'{R["lean_n"]}',  f'{R["lean_cv"]:.2f}%',
-     f'{R["lean_train"]:.2f}%', f'{R["lean_test"]:.2f}%', f'{R["lean_test"]-R["lean_train"]:+.2f}pp'],
-    ['Extended Ridge',              '35',   f'{R["ext_cv"]:.2f}%',
-     f'{R["ext_train"]:.2f}%', f'{R["ext_test"]:.2f}%', f'{R["ext_test"]-R["ext_train"]:+.2f}pp'],
-    ['RBF Kernel (Nyström)',         '35',  '—', '—', f'{R["rbf_test"]:.2f}%', '—'],
-    ['Poly Kernel (Nyström)',        '35',  '—', '—', f'{R["poly_test"]:.2f}%', '—'],
-    ['Stacked ensemble',            '35',   '—', '—', f'{R["stacked_test"]:.2f}%', '—'],
+    ['Model', 'Features', 'CV / OOF MAPE', 'Train MAPE', 'Test MAPE', 'Gap'],
+    ['Lean Ridge (primary)',         f'{R["lean_n"]}', f'{R["lean_cv"]:.2f}%',
+     f'{R["lean_train"]:.2f}%', f'{R["lean_test"]:.2f}%',  f'{R["lean_test"]-R["lean_train"]:+.2f}pp'],
+    ['Extended Ridge',               '35',             f'{R["ext_cv"]:.2f}%',
+     f'{R["ext_train"]:.2f}%',  f'{R["ext_test"]:.2f}%',   f'{R["ext_test"]-R["ext_train"]:+.2f}pp'],
+    ['RBF Kernel (Nyström)',          '35',             f'{R["rbf_cv"]:.2f}%',
+     f'{R["rbf_train"]:.2f}%',  f'{R["rbf_test"]:.2f}%',   f'{R["rbf_test"]-R["rbf_train"]:+.2f}pp'],
+    ['Poly Kernel (Nyström)',         '35',             f'{R["poly_cv"]:.2f}%',
+     f'{R["poly_train"]:.2f}%', f'{R["poly_test"]:.2f}%',  f'{R["poly_test"]-R["poly_train"]:+.2f}pp'],
+    ['Stacked ensemble',             '35',             f'{R["stacked_train"]:.2f}% †',
+     '—', f'{R["stacked_test"]:.2f}%', '—'],
     ['XGB Conservative (benchmark)', '35',  '—', '15.05%', '15.62%', '+0.57pp'],
     ['XGB Early Stopping (bmark)',   '35',  '—', '11.21%', '15.28%', '+4.08pp'],
 ]
 rt = make_table(res_data, [4.2*cm, 2.2*cm, 2.4*cm, 2.4*cm, 2.4*cm, 2.6*cm])
-# Highlight best linear row
+# Layer highlights on top of make_table base style (additive, not replacement)
 rt.setStyle(TableStyle([
+    # Alternating stripes across all data rows
+    ('BACKGROUND', (0,1), (-1,1), WHITE),
+    ('BACKGROUND', (0,2), (-1,2), LGREY),
+    ('BACKGROUND', (0,3), (-1,3), WHITE),
+    ('BACKGROUND', (0,4), (-1,4), LGREY),
+    ('BACKGROUND', (0,5), (-1,5), WHITE),
+    ('BACKGROUND', (0,6), (-1,6), LGREY),
+    ('BACKGROUND', (0,7), (-1,7), WHITE),
+    # Stacked ensemble row (row 5) -- green
     ('BACKGROUND', (0,5), (-1,5), HexColor('#e8f7ed')),
     ('FONTNAME',   (0,5), (-1,5), 'Helvetica-Bold'),
-    ('BACKGROUND', (0,6), (-1,7), HexColor('#fef9f0')),
-    ('TEXTCOLOR',  (0,0), (-1,0), WHITE),
-    ('BACKGROUND', (0,0), (-1,0), NAVY),
-    ('FONTNAME',   (0,0), (-1,0), 'Helvetica-Bold'),
-    ('FONTSIZE',   (0,0), (-1,-1), 8.5),
-    ('GRID',       (0,0), (-1,-1), 0.3, MGREY),
-    ('TOPPADDING', (0,0), (-1,-1), 2),
-    ('BOTTOMPADDING', (0,0), (-1,-1), 2),
-    ('LEFTPADDING', (0,0), (-1,-1), 6),
-    ('ALIGN',      (2,0), (-1,-1), 'CENTER'),
+    # XGB rows (6, 7) -- amber
+    ('BACKGROUND', (0,6), (-1,6), HexColor('#fef9f0')),
+    ('BACKGROUND', (0,7), (-1,7), HexColor('#fef9f0')),
+    ('ALIGN',      (1,0), (-1,-1), 'CENTER'),
     ('VALIGN',     (0,0), (-1,-1), 'MIDDLE'),
-    ('ROWBACKGROUNDS', (0,1), (-1,4), [WHITE, LGREY]),
 ]))
-story.append(rt)
-story.append(Cap('Table 3. Full results on the deduplicated dataset (4,553 properties, '
-                 '80/20 split). Best linear model highlighted in green; XGBoost benchmarks in amber. '
-                 'Gap = Test MAPE − Train MAPE; negative values indicate mild underfitting.'))
+story.append(KeepTogether([
+    rt,
+    Cap('Table 4. Full results on the deduplicated dataset (4,553 properties, '
+        '80/20 split). Best linear model highlighted in green; XGBoost benchmarks in amber. '
+        'Gap = Test MAPE − Train MAPE; negative values indicate mild underfitting. '
+        '† Stacked ensemble CV column shows OOF MAPE (each prediction made on held-out data); '
+        'a separate CV pass would require nested cross-validation.'),
+]))
 story += [SP(0.3)]
 
 story += fig('figures/fig_comparison.png', 14.5,
@@ -575,7 +629,7 @@ seg_data = [
     ['> $2M',          '47.5%', '11',  'Ultra-luxury; too few examples for reliable estimation'],
 ]
 story.append(make_table(seg_data, [3.5*cm, 2.5*cm, 2.0*cm, 7.2*cm]))
-story.append(Cap('Table 4. MAPE by price segment for the lean Ridge model. '
+story.append(Cap('Table 5. MAPE by price segment for the lean Ridge model. '
                  'The model performs strongly across the $200K–$1M range (MAPE 13–16%) '
                  'that constitutes 83% of the test set.'))
 
@@ -618,7 +672,7 @@ feat_interp = [
     [_c('size_x_condition'),    _c('−'), _c('Partial regression adjustment: after controlling for size and condition separately, the interaction absorbs residual correlation between them')],
 ]
 story.append(make_table(feat_interp, [3.0*cm, 1.2*cm, 11.8*cm], fs=8.5))
-story.append(Cap('Table 5. Top 10 features by absolute standardised coefficient with plain-language interpretation.'))
+story.append(Cap('Table 6. Top 10 features by absolute standardised coefficient with plain-language interpretation.'))
 
 story.append(numbered_subsection('7.2', 'Key Insights for Stakeholders'))
 story.append(P(
@@ -672,7 +726,7 @@ xgb_data = [
      f'{R["lean_test"]:.2f}%', f'{R["lean_test"]-R["lean_train"]:+.2f}pp', 'Primary model'],
     [f'Stacked (ours)',                 '—',      f'{R["stacked_test"]:.2f}%', '≈0pp', 'Best linear'],
 ]
-xt = make_table(xgb_data, [4.0*cm, 2.4*cm, 2.4*cm, 2.9*cm, 3.5*cm])
+xt = make_table(xgb_data, [4.5*cm, 2.3*cm, 2.3*cm, 2.8*cm, 3.3*cm])
 xt.setStyle(TableStyle([
     ('BACKGROUND', (0,0), (-1,0), NAVY), ('TEXTCOLOR', (0,0), (-1,0), WHITE),
     ('FONTNAME',   (0,0), (-1,0), 'Helvetica-Bold'),
@@ -686,7 +740,7 @@ xt.setStyle(TableStyle([
     ('ALIGN',      (1,0), (3,-1), 'CENTER'), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
 ]))
 story.append(xt)
-story.append(Cap('Table 6. XGBoost configurations versus linear models. '
+story.append(Cap('Table 7. XGBoost configurations versus linear models. '
                  'The Default configuration\'s 9.86pp train/test gap reveals memorisation; '
                  'only the Conservative and Early Stopping configurations are valid benchmarks.'))
 story.append(SP(0.2))

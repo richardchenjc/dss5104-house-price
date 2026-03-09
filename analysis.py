@@ -35,14 +35,13 @@ from sklearn.neighbors import NearestNeighbors
 sns.set_theme(style='whitegrid', font_scale=1.05)
 PALETTE = ['#1f5f8b', '#c47d00', '#2a9d47', '#c0392b', '#7b2d8b']
 SEED = 42
-_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 os.makedirs('figures', exist_ok=True)
 
 # ══════════════════════════════════════════════════════════════════
 # 1. DATA LOADING AND CLEANING
 # ══════════════════════════════════════════════════════════════════
 
-def load_and_clean(path='~/data/house_dataset.csv'):
+def load_and_clean(path='data/house_dataset.csv'):
     """Load, remove zero-price rows, and deduplicate."""
     df = pd.read_csv(path)
     n_raw = len(df)
@@ -153,14 +152,17 @@ def engineer_features(df):
     d['is_new'] = (d['house_age'] <= 5).astype(int)
 
     # ── Renovation ───────────────────────────────────────────────
-    d['was_renovated'] = (d['yr_renovated'] > 0).astype(int)
-    d['yr_reno_fill'] = np.where(d['yr_renovated'] > 0, d['yr_renovated'], d['yr_built'])
+    # Valid renovation: recorded AND date is not before construction
+    # (386 rows have yr_renovated < yr_built — century-digit typos e.g. 1912 instead of 2012)
+    d['valid_reno'] = (d['yr_renovated'] > 0) & (d['yr_renovated'] >= d['yr_built'])
+    d['was_renovated'] = d['valid_reno'].astype(int)
+    d['yr_reno_fill'] = np.where(d['valid_reno'], d['yr_renovated'], d['yr_built'])
     d['effective_age'] = d['year_sold'] - d['yr_reno_fill']
     d['recent_reno'] = (
-        (d['yr_renovated'] > 0) & (d['year_sold'] - d['yr_renovated'] <= 10)
+        d['valid_reno'] & (d['year_sold'] - d['yr_renovated'] <= 10)
     ).astype(int)
     d['reno_lag'] = np.where(
-        d['yr_renovated'] > 0, d['yr_renovated'] - d['yr_built'], 0
+        d['valid_reno'], d['yr_renovated'] - d['yr_built'], 0
     )
 
     # ── Condition ────────────────────────────────────────────────
@@ -573,10 +575,27 @@ def main():
     )
     rbf_model.fit(X_ext_tr_sc, y_tr)
     poly_model.fit(X_ext_tr_sc, y_tr)
+    rbf_train = mape(y_tr, rbf_model.predict(X_ext_tr_sc))
     rbf_test  = mape(y_te, rbf_model.predict(X_ext_te_sc))
+    poly_train = mape(y_tr, poly_model.predict(X_ext_tr_sc))
     poly_test = mape(y_te, poly_model.predict(X_ext_te_sc))
-    print(f"  RBF Kernel  — test={rbf_test:.4f}%")
-    print(f"  Poly Kernel — test={poly_test:.4f}%")
+
+    # CV MAPE for kernel models — refit full pipeline inside each fold
+    kf = KFold(n_splits=5, shuffle=True, random_state=SEED)
+    rbf_cv_scores, poly_cv_scores = [], []
+    for ti, vi in kf.split(X_ext_tr_sc):
+        m_rbf = make_pipeline(
+            Nystroem(kernel='rbf', gamma=0.005, n_components=500, random_state=SEED), Ridge(alpha=0.01)
+        ).fit(X_ext_tr_sc[ti], y_tr[ti])
+        rbf_cv_scores.append(mape(y_tr[vi], m_rbf.predict(X_ext_tr_sc[vi])))
+        m_poly = make_pipeline(
+            Nystroem(kernel='poly', degree=3, gamma=0.01, coef0=1, n_components=500, random_state=SEED), Ridge(alpha=1)
+        ).fit(X_ext_tr_sc[ti], y_tr[ti])
+        poly_cv_scores.append(mape(y_tr[vi], m_poly.predict(X_ext_tr_sc[vi])))
+    rbf_cv  = np.mean(rbf_cv_scores)
+    poly_cv = np.mean(poly_cv_scores)
+    print(f"  RBF Kernel  — train={rbf_train:.4f}%  CV={rbf_cv:.4f}%  test={rbf_test:.4f}%")
+    print(f"  Poly Kernel — train={poly_train:.4f}%  CV={poly_cv:.4f}%  test={poly_test:.4f}%")
 
     # ── Stacked ensemble ─────────────────────────────────────────
     print("\n[8] OOF stacking ...")
@@ -587,8 +606,13 @@ def main():
     ]
     oof_preds, test_preds_stack = oof_stack(base_models, X_ext_tr_sc, y_tr, X_ext_te_sc)
     meta = Ridge(alpha=0.001).fit(oof_preds, y_tr)
-    stacked_test = mape(y_te, meta.predict(test_preds_stack))
-    print(f"  Stacked (Ridge+RBF+Poly) — test={stacked_test:.4f}%")
+    stacked_test  = mape(y_te, meta.predict(test_preds_stack))
+    stacked_train = mape(y_tr, meta.predict(oof_preds))   # OOF train MAPE (honest — no leakage)
+    stacked_cv    = np.mean([                              # OOF CV: per-fold OOF MAPE
+        mape(y_tr[vi], oof_preds[vi].dot(meta.coef_) + meta.intercept_)
+        for _, vi in KFold(n_splits=5, shuffle=True, random_state=SEED).split(X_ext_tr_sc)
+    ])
+    print(f"  Stacked (Ridge+RBF+Poly) — train(OOF)={stacked_train:.4f}%  CV(OOF)={stacked_cv:.4f}%  test={stacked_test:.4f}%")
     print(f"  Meta weights: Ridge={meta.coef_[0]:.3f} RBF={meta.coef_[1]:.3f} Poly={meta.coef_[2]:.3f}")
 
     # ── Figures ──────────────────────────────────────────────────
@@ -631,8 +655,9 @@ def main():
         'lean_test': lean_test_mape, 'lean_train': lean_train_mape,
         'lean_cv': best_cv, 'lean_alpha': best_alpha, 'lean_n': len(LEAN_FEATURES),
         'ext_test': ext_test, 'ext_train': ext_train, 'ext_cv': ext_cv,
-        'rbf_test': rbf_test, 'poly_test': poly_test,
-        'stacked_test': stacked_test,
+        'rbf_test': rbf_test, 'rbf_train': rbf_train, 'rbf_cv': rbf_cv,
+        'poly_test': poly_test, 'poly_train': poly_train, 'poly_cv': poly_cv,
+        'stacked_test': stacked_test, 'stacked_train': stacked_train, 'stacked_cv': stacked_cv,
         'meta_weights': meta.coef_.tolist(),
         'xgb_conservative': 15.621, 'xgb_early_stop': 15.284,
     }
