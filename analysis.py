@@ -35,13 +35,14 @@ from sklearn.neighbors import NearestNeighbors
 sns.set_theme(style='whitegrid', font_scale=1.05)
 PALETTE = ['#1f5f8b', '#c47d00', '#2a9d47', '#c0392b', '#7b2d8b']
 SEED = 42
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 os.makedirs('figures', exist_ok=True)
 
 # ══════════════════════════════════════════════════════════════════
 # 1. DATA LOADING AND CLEANING
 # ══════════════════════════════════════════════════════════════════
 
-def load_and_clean(path='house_dataset.csv'):
+def load_and_clean(path='~/data/house_dataset.csv'):
     """Load, remove zero-price rows, and deduplicate."""
     df = pd.read_csv(path)
     n_raw = len(df)
@@ -498,7 +499,7 @@ def main():
 
     # ── Load and explore ─────────────────────────────────────────
     print("\n[1] Loading and cleaning data ...")
-    df = load_and_clean('house_dataset.csv')
+    df = load_and_clean('data/house_dataset.csv')
 
     print("\n[2] Generating EDA figures ...")
     plot_price_distribution(df)

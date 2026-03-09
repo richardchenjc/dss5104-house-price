@@ -4,6 +4,8 @@ Generates house_price_report.pdf in academic journal style.
 Run after analysis.py (requires results.json and figures/).
 """
 import json, os
+
+os.chdir(os.path.dirname(__file__) or '.')
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -56,10 +58,10 @@ ABSTRACT= sty('ABSTRACT','Normal', fontSize=9,  textColor=BLACK,
 ABS_HDR = sty('ABS_HDR', 'Normal', fontSize=9,  textColor=NAVY,
                fontName='Helvetica-Bold', spaceAfter=3, alignment=TA_CENTER)
 H1      = sty('H1', 'Heading1', fontSize=11, textColor=NAVY,
-               fontName='Helvetica-Bold', spaceBefore=14, spaceAfter=4,
+               fontName='Helvetica-Bold', spaceBefore=10, spaceAfter=3,
                borderPad=0)
 H2      = sty('H2', 'Heading2', fontSize=10, textColor=BLUE,
-               fontName='Helvetica-Bold', spaceBefore=8, spaceAfter=3)
+               fontName='Helvetica-Bold', spaceBefore=6, spaceAfter=2)
 BODY    = sty('BODY',   'Normal', fontSize=9.5, leading=14.5,
                spaceAfter=6, alignment=TA_JUSTIFY, textColor=BLACK)
 CAPTION = sty('CAPTION','Normal', fontSize=8,   leading=11,
@@ -105,25 +107,25 @@ def make_table(data, col_widths, stripe=True, header_bg=NAVY, fs=8.5):
     t.setStyle(TableStyle(style))
     return t
 
-def fig(path, width_cm=14.5, caption=None):
-    out = [Image(path, width=width_cm*cm, height=width_cm*cm*0.46)]
+def fig(path, width_cm=14.5, caption=None, aspect=0.50):
+    out = [Image(path, width=width_cm*cm, height=width_cm*cm*aspect)]
     if caption:
         out.append(Cap(caption))
     return out
 
-def two_col_fig(p1, p2, w=7.3, c1=None, c2=None):
-    row = [Image(p1, width=w*cm, height=w*cm*0.55),
-           Image(p2, width=w*cm, height=w*cm*0.55)]
-    t = Table([row], colWidths=[w*cm + 0.3*cm, w*cm + 0.3*cm])
+def two_col_fig(p1, p2, w=7.8, c1=None, c2=None):
+    row = [Image(p1, width=w*cm, height=w*cm*0.62),
+           Image(p2, width=w*cm, height=w*cm*0.62)]
+    t = Table([row], colWidths=[w*cm + 0.2*cm, w*cm + 0.2*cm])
     t.setStyle(TableStyle([
         ('VALIGN', (0,0), (-1,-1), 'TOP'),
-        ('LEFTPADDING',  (0,0), (-1,-1), 2),
-        ('RIGHTPADDING', (0,0), (-1,-1), 2),
+        ('LEFTPADDING',  (0,0), (-1,-1), 1),
+        ('RIGHTPADDING', (0,0), (-1,-1), 1),
     ]))
     out = [t]
     if c1 or c2:
         cap_row = [Cap(c1 or ''), Cap(c2 or '')]
-        ct = Table([cap_row], colWidths=[w*cm + 0.3*cm, w*cm + 0.3*cm])
+        ct = Table([cap_row], colWidths=[w*cm + 0.2*cm, w*cm + 0.2*cm])
         out.append(ct)
     return out
 
@@ -264,15 +266,15 @@ story.append(P(
     'Exploratory analysis served as the primary motivation for feature engineering '
     'decisions. Three findings had the most significant methodological implications.'
 ))
-story += two_col_fig(
-    'figures/fig_price_dist.png', 'figures/fig_eda_insights.png',
-    c1='Figure 1. Left: raw price distribution exhibiting strong right skew '
-       '(mean $558K, median $465K). Right: log-price is approximately Gaussian, '
-       'validating the choice of log(price) as modelling target.',
-    c2='Figure 2. Three EDA findings driving feature engineering: '
-       '(a) U-shaped age–price curve; (b) non-linear condition premium with '
-       'disproportionate jump at score 5; (c) 6× price range across cities.'
-)
+story += fig('figures/fig_price_dist.png', 14.5, aspect=0.42,
+    caption='Figure 1. Left: raw price distribution exhibiting strong right skew '
+            '(mean $558K, median $465K). Right: log-price is approximately Gaussian, '
+            'validating the choice of log(price) as modelling target.')
+story.append(SP(0.1))
+story += fig('figures/fig_eda_insights.png', 14.5, aspect=0.36,
+    caption='Figure 2. Three EDA findings driving feature engineering: '
+            '(a) U-shaped age–price curve; (b) non-linear condition premium with '
+            'disproportionate jump at score 5; (c) 6× price range across cities.')
 story.append(SP(0.2))
 story.append(P(
     '<b>Price distribution.</b> Sale prices range from $7,800 to $26.6 million '
@@ -393,20 +395,24 @@ story.append(P(
     'month_sold captures seasonal variation.'
 ))
 
+_cell = sty('TC', fontSize=8.5, leading=12, spaceAfter=0)
+_hdr  = sty('TH', fontSize=8.5, leading=12, spaceAfter=0, fontName='Helvetica-Bold', textColor=WHITE)
+def _c(t): return Paragraph(t, _cell)
+def _h(t): return Paragraph(t, _hdr)
 feat_tbl = [
-    ['Group', 'Features included in lean model (20 total)', 'Motivation'],
-    ['Location (4)',    'city_lp, zip_lp, zip_city_diff, zip_x_sqft',      'Dominant price determinant; smoothed encoding prevents overfit'],
-    ['Size (3)',        'log_sqft_above, log_sqft_living_sq, log_sqft_basement', 'Log + quadratic captures concave diminishing-returns curve'],
-    ['Condition (2)',   'condition, cond_x_age',                           'Condition premium; interaction with age captures upkeep signal'],
-    ['Age (2)',         'log_house_age, effective_age',                     'Log captures U-shape; effective age uses renovation date'],
-    ['Rooms (2)',       'bathrooms, sqft_per_bedroom',                      'Quality and spaciousness proxies'],
-    ['View/Water (2)',  'view, waterfront',                                 'Survives strong Lasso regularisation; direct effect'],
-    ['Basement (1)',    'has_basement',                                     'Binary presence flag; ratio excluded as near-zero in path'],
-    ['Renovation (1)',  'recent_reno',                                      '"Move-in ready" premium within 10-year window'],
-    ['Interaction (2)', 'size_x_condition, city_x_sqft',                   'Amplification of condition by size; location multiplies size value'],
-    ['Time (1)',        'month_sold',                                       'Seasonal variation within 70-day window'],
+    [_h('Group'), _h('Features included in lean model (20 total)'), _h('Motivation')],
+    [_c('Location (4)'),    _c('city_lp, zip_lp, zip_city_diff, zip_x_sqft'),           _c('Dominant price determinant; smoothed encoding prevents overfit on rare categories')],
+    [_c('Size (3)'),        _c('log_sqft_above, log_sqft_living_sq, log_sqft_basement'), _c('Log + quadratic term captures concave diminishing-returns curve')],
+    [_c('Condition (2)'),   _c('condition, cond_x_age'),                                 _c('Base condition level; interaction with age captures sustained upkeep signal')],
+    [_c('Age (2)'),         _c('log_house_age, effective_age'),                          _c('Log captures U-shape; effective age substitutes renovation year where available')],
+    [_c('Rooms (2)'),       _c('bathrooms, sqft_per_bedroom'),                           _c('Quality and spaciousness proxies')],
+    [_c('View/Water (2)'),  _c('view, waterfront'),                                      _c('Both survive strong Lasso regularisation; retained as direct effects')],
+    [_c('Basement (1)'),    _c('has_basement'),                                          _c('Binary presence flag; size ratio excluded as near-zero contribution')],
+    [_c('Renovation (1)'),  _c('recent_reno'),                                           _c('"Move-in ready" premium: renovation within 10 years of sale')],
+    [_c('Interaction (2)'), _c('size_x_condition, city_x_sqft'),                        _c('Size amplifies condition premium; city level multiplies value of living area')],
+    [_c('Time (1)'),        _c('month_sold'),                                            _c('Seasonal variation within the 70-day transaction window')],
 ]
-story.append(make_table(feat_tbl, [2.8*cm, 5.8*cm, 6.6*cm], fs=8))
+story.append(make_table(feat_tbl, [2.5*cm, 5.5*cm, 8.0*cm], fs=8.5))
 story.append(Cap('Table 2. The 20 features comprising the lean primary model, organised by group. '
                  'All location encodings are fitted on training data and re-fitted per CV fold.'))
 
@@ -527,8 +533,8 @@ rt.setStyle(TableStyle([
     ('FONTNAME',   (0,0), (-1,0), 'Helvetica-Bold'),
     ('FONTSIZE',   (0,0), (-1,-1), 8.5),
     ('GRID',       (0,0), (-1,-1), 0.3, MGREY),
-    ('TOPPADDING', (0,0), (-1,-1), 4),
-    ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+    ('TOPPADDING', (0,0), (-1,-1), 2),
+    ('BOTTOMPADDING', (0,0), (-1,-1), 2),
     ('LEFTPADDING', (0,0), (-1,-1), 6),
     ('ALIGN',      (2,0), (-1,-1), 'CENTER'),
     ('VALIGN',     (0,0), (-1,-1), 'MIDDLE'),
@@ -584,32 +590,34 @@ story.append(P(
     'all other features constant.'
 ))
 
-story += two_col_fig(
-    'figures/fig_coef.png', 'figures/fig_diagnostics.png',
-    c1='Figure 5. Standardised Ridge coefficients. Blue: positive effect on log-price; '
-       'red: negative. The quadratic log-living term dominates, consistent with '
-       'the concave size–price curve identified in EDA.',
-    c2='Figure 6. Predicted vs actual prices and residual plot. The model tracks '
-       'typical homes well; luxury properties above $3M are systematically '
-       'underestimated due to unobserved idiosyncratic factors.'
-)
+story += fig('figures/fig_coef.png', 14.5, aspect=0.52,
+    caption='Figure 5. Standardised Ridge coefficients for the lean 20-feature model. '
+            'Blue bars indicate a positive effect on log-price; red bars negative. '
+            'The quadratic log-living term dominates, consistent with the concave '
+            'size–price curve; ZIP and city encodings reflect the primacy of location.')
+story.append(SP(0.15))
+story += fig('figures/fig_diagnostics.png', 14.5, aspect=0.46,
+    caption='Figure 6. Left: predicted vs actual prices. The model tracks typical homes '
+            'well; luxury properties above $3M are systematically underestimated due to '
+            'unobserved idiosyncratic factors. Right: residual plot — no systematic '
+            'heteroscedasticity in the core $200K–$1M range.')
 story.append(SP(0.2))
 
 story.append(numbered_subsection('7.1', 'Feature Importance'))
 feat_interp = [
-    ['Feature', 'Direction', 'Interpretation'],
-    ['log_sqft_living_sq',  '+', 'Quadratic log-living area: captures the concave size–price curve; increasing returns at smaller sizes, diminishing above 3,000 sqft'],
-    ['zip_lp',              '+', 'ZIP code mean log-price: local price level is a strong prior on individual property value'],
-    ['log_sqft_above',      '+', 'Above-ground floor area contributes positively; preferred over total sqft as basements are discounted'],
-    ['city_lp',             '+', 'City-level price signal; complementary to ZIP encoding at a coarser geographic scale'],
-    ['city_x_sqft',         '−', 'Location × size interaction: coefficient direction reflects partial regression adjustment; larger homes in expensive cities are partially discounted relative to smaller homes in the same area (size substitution)'],
-    ['cond_x_age',          '+', 'Condition × age interaction: an old home in excellent condition commands a disproportionate premium — sustained upkeep is valued non-linearly'],
-    ['bathrooms',           '+', 'Bathroom count; more stable predictor than bedroom count (which is subject to high leverage from unusual configurations)'],
-    ['condition',           '+', 'Base condition level; amplified by cond_x_age for older properties'],
-    ['log_house_age',       '−', 'Older properties trade at a discount on average; the interaction with condition captures exceptions'],
-    ['size_x_condition',    '−', 'Partial regression adjustment: after controlling for size and condition separately, the interaction absorbs residual correlation'],
+    [_h('Feature'), _h('Dir.'), _h('Interpretation')],
+    [_c('log_sqft_living_sq'),  _c('+'), _c('Quadratic log-living area: captures the concave size–price curve; increasing returns at smaller sizes, diminishing above 3,000 sqft')],
+    [_c('zip_lp'),              _c('+'), _c('ZIP code mean log-price: local price level is a strong prior on individual property value')],
+    [_c('log_sqft_above'),      _c('+'), _c('Above-ground floor area contributes positively; preferred over total sqft as basements are discounted')],
+    [_c('city_lp'),             _c('+'), _c('City-level price signal; complementary to ZIP encoding at a coarser geographic scale')],
+    [_c('city_x_sqft'),         _c('−'), _c('Location × size interaction: reflects partial regression adjustment; the value of size is already absorbed by location encoding, so the interaction corrects for substitution')],
+    [_c('cond_x_age'),          _c('+'), _c('Condition × age interaction: an old home in excellent condition commands a disproportionate premium — sustained upkeep is valued non-linearly')],
+    [_c('bathrooms'),           _c('+'), _c('Bathroom count; more stable predictor than bedroom count, which is subject to high leverage from unusual configurations')],
+    [_c('condition'),           _c('+'), _c('Base condition level; amplified by cond_x_age for older properties')],
+    [_c('log_house_age'),       _c('−'), _c('Older properties trade at a discount on average; the interaction with condition captures exceptions')],
+    [_c('size_x_condition'),    _c('−'), _c('Partial regression adjustment: after controlling for size and condition separately, the interaction absorbs residual correlation between them')],
 ]
-story.append(make_table(feat_interp, [3.2*cm, 2.0*cm, 10.0*cm], fs=8))
+story.append(make_table(feat_interp, [3.0*cm, 1.2*cm, 11.8*cm], fs=8.5))
 story.append(Cap('Table 5. Top 10 features by absolute standardised coefficient with plain-language interpretation.'))
 
 story.append(numbered_subsection('7.2', 'Key Insights for Stakeholders'))
@@ -710,37 +718,23 @@ story.append(P(
 # ══════════════════════════════════════════════════════════════════
 story.append(numbered_section(9, 'Conclusion'))
 story.append(P(
-    'This paper demonstrates that a 20-feature Ridge regression model can '
-    f'achieve {R["lean_test"]:.2f}% MAPE on house price prediction, with an '
-    f'ensemble extension reaching {R["stacked_test"]:.2f}%. The performance '
-    'gap between our stacked model and a properly regularised XGBoost '
-    f'benchmark is {R["stacked_test"] - 15.62:+.2f} pp — negligible relative '
-    'to cross-validation variance, and achieved without a single tree-based '
-    'component. Three methodological contributions underpin this result.'
-))
-story.append(P(
-    'First, a data integrity audit identified and corrected an artificial '
-    '50% duplication in the raw dataset. This correction reduced the apparent '
-    'XGBoost advantage from 5+ percentage points to approximately 1 pp, '
-    'substantially changing the characterisation of the linear vs non-linear '
-    'performance gap.'
-))
-story.append(P(
-    'Second, Lasso regularisation path analysis established empirically that '
-    'predictive performance saturates near 20 features on this dataset. '
-    'This finding argues against feature proliferation and in favour of '
-    'deliberate, domain-motivated feature construction: the 20 features '
-    'that survive strong regularisation are precisely those with clear '
-    'economic interpretations.'
-))
-story.append(P(
-    'Third, the most influential features — location target encodings and '
-    'location × size interactions — encode the same heuristic that human '
-    'appraisers use: a property\'s value is anchored by comparable nearby '
-    'sales, and the value of additional space scales with neighbourhood '
-    'prestige. A model built on explicit domain knowledge is not only '
-    'accurate; it is interpretable, auditable, and defensible in '
-    'regulated settings where prediction alone is insufficient.'
+    f'This paper demonstrates that a 20-feature Ridge regression model achieves {R["lean_test"]:.2f}% '
+    f'MAPE on house price prediction, with a stacked ensemble reaching {R["stacked_test"]:.2f}%. '
+    'The gap between our best model and a properly regularised XGBoost benchmark is '
+    f'{R["stacked_test"] - 15.62:+.2f} pp — negligible relative to cross-validation variance, '
+    'and achieved without a single tree-based component. '
+    'Three methodological contributions underpin this result. '
+    'First, a data integrity audit identified and corrected an artificial 50% duplication '
+    'in the raw dataset, reducing the apparent XGBoost advantage from 5+ pp to approximately 1 pp. '
+    'Second, Lasso regularisation path analysis established empirically that predictive '
+    'performance saturates near 20 features, arguing against feature proliferation in favour '
+    'of deliberate, domain-motivated construction. '
+    'Third, the most influential features — location target encodings and location × size '
+    'interactions — encode the same heuristic that human appraisers use: a property\'s value '
+    'is anchored by comparable nearby sales, and the marginal value of additional space scales '
+    'with neighbourhood prestige. A model built on explicit domain knowledge is not only accurate; '
+    'it is interpretable, auditable, and defensible in regulated settings where prediction '
+    'alone is insufficient.'
 ))
 
 # ── Build ─────────────────────────────────────────────────────────
