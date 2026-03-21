@@ -36,8 +36,6 @@ from sklearn.preprocessing import StandardScaler
 sns.set_theme(style='whitegrid', font_scale=1.05)
 PALETTE = ['#1f5f8b', '#c47d00', '#2a9d47', '#c0392b', '#7b2d8b']
 SEED = 42
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-os.chdir(BASE_DIR)
 os.makedirs('figures', exist_ok=True)
 
 # KNN neighbourhood feature parameters
@@ -46,25 +44,38 @@ os.makedirs('figures', exist_ok=True)
 KNN_K_LOCAL = 10
 KNN_K_BROAD = 25
 
-# XGBoost benchmark results (from separate pre-run; fixed reference values)
-XGB_CONSERVATIVE_TEST = 15.621   # depth=4, n=400, heavily regularised — honest comparator
-XGB_EARLY_STOP_TEST   = 15.284   # early stopping, n=344 — principled comparator
-XGB_RESULTS = {
-    # name, train_mape, test_mape
-    'Default (depth=6)':      (5.631,  15.493),
-    'Tuned (depth=7)':        (10.452, 15.376),
-    'Conservative (depth=4)': (15.051, 15.621),
-    'Early Stopping':         (11.206, 15.284),
-}
+# XGBoost benchmark results — loaded from xgb_results.json if available,
+# otherwise fall back to pre-run values. Run xgboost_benchmark.py first to
+# generate xgb_results.json with fully reproducible benchmark figures.
+_xgb_path = os.path.join(os.path.dirname(os.path.abspath(__file__))
+                         if '__file__' in dir() else '.', 'xgb_results.json')
+if os.path.exists('xgb_results.json'):
+    with open('xgb_results.json') as _f:
+        _xgb = json.load(_f)
+    XGB_CONSERVATIVE_TEST = _xgb['xgb_conservative']
+    XGB_EARLY_STOP_TEST   = _xgb['xgb_early_stop']
+    XGB_RESULTS = {
+        name: (r['train_mape'], r['test_mape'])
+        for name, r in _xgb['xgb_all'].items()
+    }
+else:
+    # Fallback: pre-run values (depth=4 conservative and early stopping)
+    # Run xgboost_benchmark.py to replace these with reproducible values.
+    XGB_CONSERVATIVE_TEST = 15.621
+    XGB_EARLY_STOP_TEST   = 15.284
+    XGB_RESULTS = {
+        'Default (depth=6)':      (5.631,  15.493),
+        'Tuned (depth=7)':        (10.452, 15.376),
+        'Conservative (depth=4)': (15.051, 15.621),
+        'Early Stopping':         (11.206, 15.284),
+    }
 
 # ══════════════════════════════════════════════════════════════════
 # 1. DATA LOADING AND CLEANING
 # ══════════════════════════════════════════════════════════════════
 
-def load_and_clean(path=None):
+def load_and_clean(path='data/house_dataset.csv'):
     """Load, remove zero-price rows, and deduplicate."""
-    if path is None:
-        path = os.path.join(BASE_DIR, 'data', 'house_dataset.csv')
     df = pd.read_csv(path)
     n_raw = len(df)
 
@@ -930,7 +941,7 @@ def plot_comparison(results):
     xgb_p = mpatches.Patch(color=PALETTE[1], label='XGBoost benchmark')
     ax.legend(handles=[linear_p, xgb_p], fontsize=9)
 
-    # Right: XGBoost train/test gap (fixed benchmarks from separate pre-run)
+    # Right: XGBoost train/test gap — loaded from xgb_results.json if available
     xgb_entries = list(XGB_RESULTS.items())
     xgb_names = ['Default\n(depth=6)', 'Tuned\n(depth=7)', 'Conservative\n(depth=4)', 'Early\nStopping']
     xgb_train = [v[0] for _, v in xgb_entries]
@@ -963,7 +974,7 @@ def main():
 
     # ── Load and explore ─────────────────────────────────────────
     print("\n[1] Loading and cleaning data ...")
-    df = load_and_clean()
+    df = load_and_clean('data/house_dataset.csv')
 
     print("\n[2] Generating EDA figures ...")
     plot_price_distribution(df)
@@ -1054,6 +1065,21 @@ def main():
         'candidate_n': len(CANDIDATE_FEATURES),
         'xgb_conservative': XGB_CONSERVATIVE_TEST, 'xgb_early_stop': XGB_EARLY_STOP_TEST,
     }
+    # Merge xgb_results.json if present (written by xgboost_benchmark.py)
+    # This carries xgb_all (per-config train/test/gap) into results.json so
+    # make_report.py only needs to open one file for all metrics.
+    if os.path.exists('xgb_results.json'):
+        with open('xgb_results.json') as f:
+            _xgb_extra = json.load(f)
+        summary['xgb_all']            = _xgb_extra.get('xgb_all', {})
+        summary['xgboost_version']    = _xgb_extra.get('xgboost_version', 'unknown')
+        # Overwrite conservative/early_stop with the freshly computed values
+        summary['xgb_conservative']   = _xgb_extra['xgb_conservative']
+        summary['xgb_early_stop']     = _xgb_extra['xgb_early_stop']
+        print("  xgb_results.json merged — benchmark values are fully reproducible.")
+    else:
+        print("  xgb_results.json not found — using fallback XGB values.")
+        print("  Run xgboost_benchmark.py to generate reproducible benchmark figures.")
     with open('results.json', 'w') as f:
         json.dump(summary, f, indent=2)
     print("\n  Results saved to results.json")

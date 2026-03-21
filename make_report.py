@@ -502,30 +502,25 @@ def _group(feats, names):
 
 surv_tbl = [
     [_h('Group'), _h(f'Selected features (n={R["lean_n"]}, at elbow)'), _h('Dropped / below elbow')],
-    [_c('Location'),    _c(_group(_surv, ['city_lp','zip_lp','zip_x_sqft'])),
-                        _c('zip_city_diff')],
-    [_c('Size'),        _c(_group(_surv, ['log_sqft_above','log_sqft_basement','log_sqft_lot',
-                                          'log_sqft_living_sq','living_to_lot','basement_ratio'])),
-                        _c('log_sqft_living, log_sqft_lot, living_to_lot,\nbasement_ratio, log_sqft_above,\nlog_sqft_basement, log_sqft_living_sq')],
-    [_c('Rooms'),       _c(_group(_surv, ['bathrooms','floors','sqft_per_bedroom','bath_bed_ratio'])),
-                        _c('bathrooms, floors, bath_bed_ratio')],
-    [_c('Condition'),   _c(_group(_surv, ['condition','cond_x_age','top_condition'])),
-                        _c('condition, top_condition')],
-    [_c('Age'),         _c(_group(_surv, ['era_lp','house_age','log_house_age','effective_age','is_new'])),
-                        _c('log_house_age, effective_age, is_new, house_age')],
-    [_c('Renovation'),  _c(_group(_surv, ['was_renovated','recent_reno','reno_lag'])),
-                        _c('was_renovated, recent_reno, reno_lag')],
-    [_c('View/Water'),  _c(_group(_surv, ['view','waterfront'])),
-                        _c('view')],
-    [_c('Time'),        _c(_group(_surv, ['month_sold'])),
-                        _c('month_sold')],
-    [_c('KNN'),         _c(_group(_surv, ['knn_median','knn_weighted_mean','knn_broad_weighted','knn_local_vs_broad'])),
-                        _c(', '.join([f for f in ['knn_median','knn_weighted_mean','knn_broad_weighted','knn_local_vs_broad'] if f not in _surv]) or '—')],
-    [_c('Frequency'),   _c(_group(_surv, ['log_zip_freq','log_city_freq','zip_freq_x_lp','city_freq_x_lp'])),
-                        _c(', '.join([f for f in ['log_zip_freq','log_city_freq','zip_freq_x_lp','city_freq_x_lp'] if f not in _surv]) or '—')],
-    [_c('Direction'),   _c(_group(_surv, ['dir_lp','zip_dir_lp','zip_dir_x_sqft'])),
-                        _c(', '.join([f for f in ['dir_lp','zip_dir_lp','zip_dir_x_sqft'] if f not in _surv]) or '—')],
 ]
+_tbl4_groups = [
+    ('Location',   ['city_lp','zip_lp','zip_x_sqft','zip_city_diff']),
+    ('Size',       ['log_sqft_living','log_sqft_above','log_sqft_basement','log_sqft_lot',
+                    'log_sqft_living_sq','living_to_lot','basement_ratio']),
+    ('Rooms',      ['bathrooms','floors','sqft_per_bedroom','bath_bed_ratio']),
+    ('Condition',  ['condition','cond_x_age','top_condition']),
+    ('Age',        ['era_lp','house_age','log_house_age','effective_age','is_new']),
+    ('Renovation', ['was_renovated','recent_reno','reno_lag']),
+    ('View/Water', ['view','waterfront']),
+    ('Time',       ['month_sold']),
+    ('Frequency',  ['log_zip_freq','log_city_freq','zip_freq_x_lp','city_freq_x_lp']),
+    ('Direction',  ['dir_lp','zip_dir_lp','zip_dir_x_sqft']),
+    ('KNN',        ['knn_median','knn_weighted_mean','knn_broad_weighted','knn_local_vs_broad']),
+]
+for grp, feats in _tbl4_groups:
+    selected = _group(_surv, feats)
+    dropped  = ', '.join(f for f in feats if f not in _surv) or '—'
+    surv_tbl.append([_c(grp), _c(selected), _c(dropped)])
 story.append(make_table(surv_tbl, [2.4*cm, 6.0*cm, 7.6*cm], fs=8.0))
 story.append(Cap(
     f'Table 4. The {R["lean_n"]} features selected at the Lasso path elbow (CV MAPE = {R["lean_cv"]:.2f}%, '
@@ -699,12 +694,35 @@ story.append(P(
     'non-linear upper bound. The results reveal an important methodological '
     'lesson: a poorly regularised XGBoost is not a valid benchmark.'
 ))
+# Load XGB per-config details if available (written by xgboost_benchmark.py)
+_xgb = R.get('xgb_all', {})
+def _xv(key, field, fallback):
+    """Read from xgb_all if present, else fallback string."""
+    cfg = _xgb.get(key, {})
+    if not cfg: return fallback
+    v = cfg[field]
+    return f'{v:.2f}%' if field.endswith('mape') else f'{v:+.2f}pp'
+
+_es_n = _xgb.get('Early Stopping', {}).get('n_estimators_used', 344)
+
 xgb_data = [
     ['Configuration', 'Train MAPE', 'Test MAPE', 'Train/Test Gap', 'Assessment'],
-    ['Default (depth=6, n=500)',         '5.63%',  '15.49%', '+9.86pp', 'Severely overfit'],
-    ['Tuned deeper (depth=7, n=800)',    '10.45%', '15.38%', '+4.92pp', 'Overfit'],
-    ['Conservative (depth=4, n=400)',   '15.05%', f'{R["xgb_conservative"]:.2f}%', '+0.57pp', 'Honest comparator'],
-    ['Early Stopping (n=344)',          '11.21%', f'{R["xgb_early_stop"]:.2f}%',   '+4.08pp', 'Principled'],
+    ['Default (depth=6, n=500)',
+     _xv('Default (depth=6)', 'train_mape', '5.63%'),
+     _xv('Default (depth=6)', 'test_mape',  '15.49%'),
+     _xv('Default (depth=6)', 'gap',        '+9.86pp'), 'Severely overfit'],
+    ['Tuned deeper (depth=7, n=800)',
+     _xv('Tuned (depth=7)', 'train_mape', '10.45%'),
+     _xv('Tuned (depth=7)', 'test_mape',  '15.38%'),
+     _xv('Tuned (depth=7)', 'gap',        '+4.92pp'), 'Overfit'],
+    ['Conservative (depth=4, n=400)',
+     _xv('Conservative (depth=4)', 'train_mape', '15.05%'),
+     f'{R["xgb_conservative"]:.2f}%',
+     _xv('Conservative (depth=4)', 'gap', '+0.57pp'), 'Honest comparator'],
+    [f'Early Stopping (n={_es_n})',
+     _xv('Early Stopping', 'train_mape', '11.21%'),
+     f'{R["xgb_early_stop"]:.2f}%',
+     _xv('Early Stopping', 'gap', '+4.08pp'), 'Principled'],
     [f'Lean Ridge (ours, {R["lean_n"]} feats)', f'{R["lean_train"]:.2f}%',
      f'{R["lean_test"]:.2f}%', f'{R["lean_test"]-R["lean_train"]:+.2f}pp', 'Primary model'],
 ]
