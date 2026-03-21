@@ -7,18 +7,21 @@ Run:
     python analysis.py
 
 Outputs (written to ./figures/):
-    fig_price_dist.png   — price distribution & log-price
-    fig_corr.png         — correlation heatmap
-    fig_eda_insights.png — age curve, condition premium, city prices
+    fig_price_dist.png      — price distribution & log-price
+    fig_corr.png            — correlation heatmap
+    fig_eda_insights.png    — age curve, condition premium, city prices
+    fig_eda_size.png        — size–price curve, log transform, sqft/bedroom
+    fig_eda_view_reno.png   — view premium, waterfront, renovation recency
+    fig_eda_direction.png   — ZIP × direction heatmap
     fig_mape_vs_nfeats.png  — regularisation path
-    fig_coef.png         — Ridge coefficients (lean model)
-    fig_diagnostics.png  — predicted vs actual, residuals
-    fig_segments.png     — MAPE by price segment
-    fig_comparison.png   — full model progression + XGBoost
+    fig_coef.png            — Ridge coefficients (lean model)
+    fig_diagnostics.png     — predicted vs actual, residuals
+    fig_segments.png        — MAPE by price segment
+    fig_comparison.png      — full model progression + XGBoost
 """
 
 import warnings; warnings.filterwarnings('ignore')
-import os, json
+import os, json, re
 import pandas as pd
 import numpy as np
 import matplotlib; matplotlib.use('Agg')
@@ -27,16 +30,14 @@ import matplotlib.patches as mpatches
 import seaborn as sns
 from sklearn.model_selection import train_test_split, KFold
 from sklearn.linear_model import Ridge, Lasso
-from sklearn.kernel_approximation import Nystroem
 from sklearn.neighbors import NearestNeighbors
-from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
-
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 sns.set_theme(style='whitegrid', font_scale=1.05)
 PALETTE = ['#1f5f8b', '#c47d00', '#2a9d47', '#c0392b', '#7b2d8b']
 SEED = 42
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+os.chdir(BASE_DIR)
 os.makedirs('figures', exist_ok=True)
 
 # KNN neighbourhood feature parameters
@@ -150,6 +151,271 @@ def plot_eda_insights(df):
     plt.savefig('figures/fig_eda_insights.png', dpi=130); plt.close()
     print("  Saved fig_eda_insights.png")
 
+def plot_eda_size(df):
+    """Size vs price: motivates log-transform, sqft_living_sq, room ratios."""
+    d = df.copy()
+    d['sqft_per_bedroom'] = d['sqft_living'] / (d['bedrooms'].clip(lower=1))
+
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4))
+
+    # sqft_living vs price — concave curve motivating log + quadratic
+    ax = axes[0]
+    # Bin sqft and show median price
+    bins = pd.cut(d['sqft_living'], bins=20)
+    med = d.groupby(bins)['price'].median() / 1e3
+    mids = [b.mid for b in med.index]
+    ax.plot(mids, med.values, 'o-', color=PALETTE[0], lw=2, ms=5)
+    ax.set_xlabel('Living Area (sqft)'); ax.set_ylabel('Median Price ($K)')
+    ax.set_title('Size–Price Relationship\n(concave curve motivates log + log² terms)')
+
+    # log_sqft_living vs log_price — near-linear after log
+    ax2 = axes[1]
+    sample = d.sample(min(1500, len(d)), random_state=42)
+    ax2.scatter(np.log1p(sample['sqft_living']), np.log(sample['price']),
+                alpha=0.2, s=6, color=PALETTE[1])
+    ax2.set_xlabel('log(sqft_living)'); ax2.set_ylabel('log(price)')
+    ax2.set_title('log(sqft) vs log(price)\n(near-linear — validates log transform)')
+    # Add trend line
+    m, b = np.polyfit(np.log1p(d['sqft_living']), np.log(d['price']), 1)
+    x_range = np.linspace(np.log1p(d['sqft_living']).min(),
+                          np.log1p(d['sqft_living']).max(), 100)
+    ax2.plot(x_range, m * x_range + b, 'r--', lw=1.5, alpha=0.8)
+
+    # sqft_per_bedroom vs price — motivates room quality ratio
+    ax3 = axes[2]
+    bins3 = pd.cut(d['sqft_per_bedroom'], bins=15)
+    med3 = d.groupby(bins3)['price'].median() / 1e3
+    mids3 = [b.mid for b in med3.index]
+    ax3.plot(mids3, med3.values, 'o-', color=PALETTE[2], lw=2, ms=5)
+    ax3.set_xlabel('sqft per Bedroom'); ax3.set_ylabel('Median Price ($K)')
+    ax3.set_title('Space Quality (sqft/bedroom) vs Price\n(motivates sqft_per_bedroom feature)')
+
+    plt.tight_layout()
+    plt.savefig('figures/fig_eda_size.png', dpi=130); plt.close()
+    print("  Saved fig_eda_size.png")
+
+def plot_eda_view_reno(df):
+    """View premium ladder, waterfront, renovation paradox."""
+    d = df.copy()
+    d['date'] = pd.to_datetime(d['date'])
+    d['house_age'] = d['date'].dt.year - d['yr_built']
+    valid_reno = (d['yr_renovated'] > 0) & (d['yr_renovated'] >= d['yr_built'])
+    d['was_renovated'] = valid_reno.astype(int)
+    d['reno_lag'] = np.where(valid_reno, d['yr_renovated'] - d['yr_built'], np.nan)
+
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4))
+
+    # View premium ladder (0-4)
+    ax = axes[0]
+    view_med = d.groupby('view')['price'].median() / 1e3
+    view_n   = d.groupby('view')['price'].count()
+    colors_v = [PALETTE[0] if v == 0 else PALETTE[2] for v in view_med.index]
+    bars = ax.bar(view_med.index, view_med.values, color=colors_v,
+                  edgecolor='white', alpha=0.85)
+    for bar, val, n in zip(bars, view_med.values, view_n.values):
+        ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 10,
+                f'${val:.0f}K\n(n={n})', ha='center', fontsize=7.5)
+    ax.set_xlabel('View Score (0–4)'); ax.set_ylabel('Median Price ($K)')
+    ax.set_title('View–Price Premium\n(non-linear jump; motivates ordinal view feature)')
+    ax.set_ylim(0, view_med.max() * 1.3)
+
+    # Waterfront premium
+    ax2 = axes[1]
+    wf_med = d.groupby('waterfront')['price'].median() / 1e3
+    wf_n   = d.groupby('waterfront')['price'].count()
+    bars2 = ax2.bar(['No Waterfront', 'Waterfront'], wf_med.values,
+                    color=[PALETTE[0], PALETTE[2]], edgecolor='white', alpha=0.85)
+    for bar, val, n in zip(bars2, wf_med.values, wf_n.values):
+        ax2.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 15,
+                 f'${val:.0f}K\n(n={n})', ha='center', fontsize=8.5)
+    premium = (wf_med[1] / wf_med[0] - 1) * 100
+    ax2.set_ylabel('Median Price ($K)')
+    ax2.set_title(f'Waterfront Premium: +{premium:.0f}%\n(motivates binary waterfront flag)')
+    ax2.set_ylim(0, wf_med.max() * 1.35)
+
+    # Renovation paradox — raw flag is negative; recency matters
+    ax3 = axes[2]
+    # Show median price by renovation age bucket
+    d_reno = d[valid_reno].copy()
+    d_reno['reno_age'] = d_reno['date'].dt.year - d_reno['yr_renovated']
+    bins_r = [-1, 0, 2, 5, 10, 20, 50, 100]
+    labels_r = ['Same yr','≤2 yrs','3-5 yrs','6-10 yrs','11-20 yrs','21-50 yrs','>50 yrs']
+    d_reno['reno_bucket'] = pd.cut(d_reno['reno_age'], bins=bins_r, labels=labels_r)
+    reno_med = d_reno.groupby('reno_bucket', observed=True)['price'].median() / 1e3
+    reno_n   = d_reno.groupby('reno_bucket', observed=True)['price'].count()
+    bar_colors = [PALETTE[2] if i < 3 else PALETTE[1] if i < 5 else PALETTE[3]
+                  for i in range(len(reno_med))]
+    bars3 = ax3.bar(range(len(reno_med)), reno_med.values,
+                    color=bar_colors, edgecolor='white', alpha=0.85)
+    for bar, val, n in zip(bars3, reno_med.values, reno_n.values):
+        ax3.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 5,
+                 f'{val:.0f}K\n(n={n})', ha='center', fontsize=7)
+    ax3.axhline(d['price'].median()/1e3, color='black', linestyle='--',
+                lw=1.2, label=f'Overall median ${d["price"].median()/1e3:.0f}K')
+    ax3.set_xticks(range(len(reno_med)))
+    ax3.set_xticklabels(labels_r, rotation=30, ha='right', fontsize=8)
+    ax3.set_ylabel('Median Price ($K)')
+    ax3.set_title('Renovation Recency vs Price\n(recent reno commands premium; motivates recent_reno)')
+    ax3.legend(fontsize=8)
+
+    plt.tight_layout()
+    plt.savefig('figures/fig_eda_view_reno.png', dpi=130); plt.close()
+    print("  Saved fig_eda_view_reno.png")
+
+
+def plot_eda_size_view_reno(df):
+    """Combined 2-row figure: size (top) + view/waterfront/renovation (bottom)."""
+    d = df.copy()
+    d['date'] = pd.to_datetime(d['date'])
+    d['house_age'] = d['date'].dt.year - d['yr_built']
+    valid_reno = (d['yr_renovated'] > 0) & (d['yr_renovated'] >= d['yr_built'])
+    d['was_renovated'] = valid_reno.astype(int)
+
+    fig, axes = plt.subplots(2, 3, figsize=(15, 8))
+
+    # ── Row 1: Size ───────────────────────────────────────────────
+    # (a) sqft_living vs price — concave curve
+    ax = axes[0, 0]
+    bins = pd.cut(d['sqft_living'], bins=20)
+    med = d.groupby(bins, observed=True)['price'].median() / 1e3
+    mids = [b.mid for b in med.index]
+    ax.plot(mids, med.values, 'o-', color=PALETTE[0], lw=2, ms=5)
+    ax.set_xlabel('Living Area (sqft)'); ax.set_ylabel('Median Price ($K)')
+    ax.set_title('(a) Size–Price: concave curve\nmotivates log + log² terms')
+
+    # (b) log(sqft) vs log(price) — linearised
+    ax2 = axes[0, 1]
+    sample = d.sample(min(1500, len(d)), random_state=42)
+    ax2.scatter(np.log1p(sample['sqft_living']), np.log(sample['price']),
+                alpha=0.2, s=6, color=PALETTE[1])
+    m, b = np.polyfit(np.log1p(d['sqft_living']), np.log(d['price']), 1)
+    xr = np.linspace(np.log1p(d['sqft_living']).min(),
+                     np.log1p(d['sqft_living']).max(), 100)
+    ax2.plot(xr, m * xr + b, 'r--', lw=1.5)
+    ax2.set_xlabel('log(sqft_living)'); ax2.set_ylabel('log(price)')
+    ax2.set_title('(b) log(sqft) vs log(price)\nlinearised — validates log transform')
+
+    # (c) sqft_per_bedroom vs price
+    ax3 = axes[0, 2]
+    d['spb'] = d['sqft_living'] / (d['bedrooms'].clip(lower=1))
+    bins3 = pd.cut(d['spb'], bins=15)
+    med3 = d.groupby(bins3, observed=True)['price'].median() / 1e3
+    mids3 = [b.mid for b in med3.index]
+    ax3.plot(mids3, med3.values, 'o-', color=PALETTE[2], lw=2, ms=5)
+    ax3.set_xlabel('sqft per Bedroom'); ax3.set_ylabel('Median Price ($K)')
+    ax3.set_title('(c) Space quality (sqft/bedroom)\nmotivates sqft_per_bedroom feature')
+
+    # ── Row 2: View / Waterfront / Renovation ────────────────────
+    # (d) View premium ladder
+    ax4 = axes[1, 0]
+    view_med = d.groupby('view')['price'].median() / 1e3
+    view_n   = d.groupby('view')['price'].count()
+    clrs = [PALETTE[0] if v == 0 else PALETTE[2] for v in view_med.index]
+    bars = ax4.bar(view_med.index, view_med.values, color=clrs, edgecolor='white', alpha=0.85)
+    for bar, val, n in zip(bars, view_med.values, view_n.values):
+        ax4.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 10,
+                 f'${val:.0f}K\n(n={n})', ha='center', fontsize=7)
+    ax4.set_xlabel('View Score (0–4)'); ax4.set_ylabel('Median Price ($K)')
+    ax4.set_title('(d) View premium ladder\nnon-linear; motivates ordinal view feature')
+    ax4.set_ylim(0, view_med.max() * 1.3)
+
+    # (e) Waterfront premium
+    ax5 = axes[1, 1]
+    wf_med = d.groupby('waterfront')['price'].median() / 1e3
+    wf_n   = d.groupby('waterfront')['price'].count()
+    bars2 = ax5.bar(['No Waterfront', 'Waterfront'], wf_med.values,
+                    color=[PALETTE[0], PALETTE[2]], edgecolor='white', alpha=0.85)
+    for bar, val, n in zip(bars2, wf_med.values, wf_n.values):
+        ax5.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 15,
+                 f'${val:.0f}K\n(n={n})', ha='center', fontsize=8)
+    premium = (wf_med[1] / wf_med[0] - 1) * 100
+    ax5.set_ylabel('Median Price ($K)')
+    ax5.set_title(f'(e) Waterfront: +{premium:.0f}% premium\nmotivates binary waterfront flag')
+    ax5.set_ylim(0, wf_med.max() * 1.35)
+
+    # (f) Renovation recency vs price
+    ax6 = axes[1, 2]
+    d_reno = d[valid_reno].copy()
+    d_reno['reno_age'] = d_reno['date'].dt.year - d_reno['yr_renovated']
+    bins_r  = [-1, 0, 2, 5, 10, 20, 50, 100]
+    labels_r = ['Same yr', '≤2 yrs', '3–5 yrs', '6–10 yrs', '11–20 yrs', '21–50 yrs', '>50 yrs']
+    d_reno['reno_bucket'] = pd.cut(d_reno['reno_age'], bins=bins_r, labels=labels_r)
+    reno_med = d_reno.groupby('reno_bucket', observed=True)['price'].median() / 1e3
+    reno_n   = d_reno.groupby('reno_bucket', observed=True)['price'].count()
+    bar_c = [PALETTE[2] if i < 3 else PALETTE[1] if i < 5 else PALETTE[3]
+             for i in range(len(reno_med))]
+    bars3 = ax6.bar(range(len(reno_med)), reno_med.values, color=bar_c,
+                    edgecolor='white', alpha=0.85)
+    for bar, val, n in zip(bars3, reno_med.values, reno_n.values):
+        ax6.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 4,
+                 f'{val:.0f}K\n(n={n})', ha='center', fontsize=6.5)
+    ax6.axhline(d['price'].median()/1e3, color='black', linestyle='--',
+                lw=1.2, label=f'Overall median')
+    ax6.set_xticks(range(len(reno_med)))
+    ax6.set_xticklabels(labels_r, rotation=30, ha='right', fontsize=7.5)
+    ax6.set_ylabel('Median Price ($K)')
+    ax6.set_title('(f) Renovation recency vs price\nrecent reno premium motivates recent_reno')
+    ax6.legend(fontsize=8)
+
+    plt.tight_layout()
+    plt.savefig('figures/fig_eda_size_view_reno.png', dpi=130); plt.close()
+    print("  Saved fig_eda_size_view_reno.png")
+
+def plot_eda_direction(df):
+    """ZIP×direction heatmap — motivates street direction features."""
+    d = df.copy()
+    _DIR = re.compile(r'\b(NE|NW|SE|SW|N|S|E|W)\b', re.IGNORECASE)
+    def _extract_dir(street):
+        matches = _DIR.findall(str(street))
+        if not matches: return 'NONE'
+        dirs = [m.upper() for m in matches]
+        compound = [x for x in dirs if len(x) == 2]
+        return compound[-1] if compound else dirs[-1]
+    d['street_dir'] = d['street'].apply(_extract_dir)
+    d['zipcode'] = d['statezip'].str.extract(r'(\d{5})', expand=False).astype(str)
+
+    # Pivot: mean price by ZIP × direction
+    # Keep only ZIPs with ≥20 properties and directions with ≥3 obs in that ZIP
+    zip_counts = d['zipcode'].value_counts()
+    top_zips = zip_counts[zip_counts >= 20].index.tolist()
+    d_sub = d[d['zipcode'].isin(top_zips)].copy()
+
+    pivot = d_sub.groupby(['zipcode', 'street_dir'])['price'].agg(['mean','count'])
+    pivot = pivot[pivot['count'] >= 3]['mean'].unstack('street_dir') / 1e6
+
+    # Sort ZIPs by median price
+    zip_order = d_sub.groupby('zipcode')['price'].median().sort_values().index
+    pivot = pivot.reindex(zip_order)
+
+    # Keep only main directions
+    dir_order = [c for c in ['NW','W','N','NE','SW','S','SE','E','NONE'] if c in pivot.columns]
+    pivot = pivot[dir_order]
+
+    fig, ax = plt.subplots(figsize=(12, 7))
+    import matplotlib.colors as mcolors
+    cmap = plt.cm.YlOrRd
+    im = ax.imshow(pivot.values, cmap=cmap, aspect='auto')
+    ax.set_xticks(range(len(pivot.columns)))
+    ax.set_xticklabels(pivot.columns, fontsize=9)
+    ax.set_yticks(range(len(pivot.index)))
+    ax.set_yticklabels(pivot.index, fontsize=8)
+    ax.set_xlabel('Street Direction'); ax.set_ylabel('ZIP Code')
+    ax.set_title('Mean Price ($M) by ZIP × Street Direction\n'
+                 '(colour intensity shows directional premium within each ZIP)')
+    plt.colorbar(im, ax=ax, label='Mean Price ($M)', shrink=0.8)
+
+    # Annotate cells with mean price where data exists
+    for i in range(pivot.shape[0]):
+        for j in range(pivot.shape[1]):
+            val = pivot.values[i, j]
+            if not np.isnan(val):
+                ax.text(j, i, f'{val:.2f}', ha='center', va='center',
+                        fontsize=6.5, color='black' if val < pivot.values[~np.isnan(pivot.values)].max()*0.7 else 'white')
+
+    plt.tight_layout()
+    plt.savefig('figures/fig_eda_direction.png', dpi=130); plt.close()
+    print("  Saved fig_eda_direction.png")
+
 # ══════════════════════════════════════════════════════════════════
 # 3. FEATURE ENGINEERING
 # ══════════════════════════════════════════════════════════════════
@@ -213,6 +479,22 @@ def engineer_features(df):
     bins = [0, 1919, 1939, 1959, 1979, 1999, 2014]
     labels = ['pre1920', '1920s_30s', '1940s_50s', '1960s_70s', '1980s_90s', '2000-2014']
     d['build_era'] = pd.cut(d['yr_built'], bins=bins, labels=labels).astype(str)
+
+    # ── Street direction ─────────────────────────────────────────
+    # Extract compass direction token from street address (96.4% coverage).
+    # Directions appear as suffix ("Densmore Ave N", "170th Pl NE") or
+    # as a prefix after the house number ("NE 88th St", "SW Portland Ct").
+    # Strategy: find all direction tokens; prefer compound (NE/NW/SE/SW)
+    # over cardinal (N/S/E/W); take last match (avoids street-name false hits).
+    _DIR = re.compile(r'\b(NE|NW|SE|SW|N|S|E|W)\b', re.IGNORECASE)
+    def _extract_dir(street):
+        matches = _DIR.findall(str(street))
+        if not matches:
+            return 'NONE'
+        dirs = [m.upper() for m in matches]
+        compound = [x for x in dirs if len(x) == 2]
+        return compound[-1] if compound else dirs[-1]
+    d['street_dir'] = d['street'].apply(_extract_dir)
 
     return d
 
@@ -328,6 +610,27 @@ def add_encodings(train_df, test_df):
         d_['zip_freq_x_lp']  = d_['log_zip_freq']  * d_['zip_lp']
         d_['city_freq_x_lp'] = d_['log_city_freq'] * d_['city_lp']
 
+    # ── Street direction encodings ───────────────────────────────────
+    # Compass direction extracted from street address (96.4% coverage).
+    # dir_lp: target-encoded direction alone — captures broad directional premiums.
+    # zip_dir_lp: target-encoded ZIP × direction — captures the ZIP-specific
+    #   directional premium (e.g. NW streets in 98006/98033 face lake/mountains).
+    #   This is the main signal from the EDA heatmap (graph C).
+    # zip_dir_x_sqft: ZIP×direction × log(sqft) — location-direction-size interaction.
+    # Partial correlations vs lean 8: dir_lp r=0.09, zip_dir_lp r=0.16, zip_dir_x_sqft r=0.16.
+    # All three survive Lasso path elbow; combined CV improvement: −0.26pp.
+    global_mean = train_df['log_price'].mean()
+    dir_means    = train_df.groupby(train_df['street_dir'])['log_price'].mean()
+    zip_dir_tr   = train_df['zipcode'] + '_' + train_df['street_dir']
+    zip_dir_te   = test_df['zipcode']  + '_' + test_df['street_dir']
+    zip_dir_means = train_df.groupby(zip_dir_tr.values)['log_price'].mean()
+    tr['dir_lp']     = train_df['street_dir'].map(dir_means).fillna(global_mean).values
+    te['dir_lp']     = test_df['street_dir'].map(dir_means).fillna(global_mean).values
+    tr['zip_dir_lp'] = zip_dir_tr.map(zip_dir_means).fillna(global_mean).values
+    te['zip_dir_lp'] = zip_dir_te.map(zip_dir_means).fillna(global_mean).values
+    for d_ in [tr, te]:
+        d_['zip_dir_x_sqft'] = d_['zip_dir_lp'] * d_['log_sqft_living']
+
     return tr, te
 
 # ── Feature sets ─────────────────────────────────────────────────
@@ -369,6 +672,12 @@ CANDIDATE_FEATURES = [
     # Collinearity audit: all r < 0.23 with existing features.
     # city_freq_x_lp enters Lasso path early and persists; −0.30pp CV improvement.
     'log_zip_freq', 'log_city_freq', 'zip_freq_x_lp', 'city_freq_x_lp',
+    # Street direction features (compass direction extracted from street address)
+    # 96.4% coverage; ZIP×direction interaction captures directional premiums
+    # within specific ZIPs (e.g. NW streets facing lake/mountains in 98006/98033).
+    # Partial correlations vs lean 8: dir_lp r=0.09, zip_dir_lp/zip_dir_x_sqft r=0.16.
+    # All three survive Lasso elbow; CV improvement −0.26pp.
+    'dir_lp', 'zip_dir_lp', 'zip_dir_x_sqft',
 ]
 
 # LEAN_FEATURES is derived in main() via Lasso path; placeholder overwritten at runtime
@@ -660,6 +969,10 @@ def main():
     plot_price_distribution(df)
     plot_correlations(df)
     plot_eda_insights(df)
+    plot_eda_size(df)
+    plot_eda_view_reno(df)
+    plot_eda_size_view_reno(df)
+    plot_eda_direction(df)
 
     # ── Feature engineering ──────────────────────────────────────
     print("\n[3] Engineering features ...")
@@ -704,61 +1017,8 @@ def main():
     lean_test_mape  = mape(y_te, ridge_lean.predict(sc_lean.transform(X_lean_te)))
     print(f"  Lean Ridge  — train={lean_train_mape:.4f}%  test={lean_test_mape:.4f}%  gap={lean_test_mape-lean_train_mape:+.4f}%")
 
-    # ── Kernel models — same lean features as Ridge ──────────────
-    # Feature set is consistent: the elbow-selected features apply
-    # equally here. The kernel expands the hypothesis space to capture
-    # non-linear interactions but does not alter the input feature set.
-    print("\n[6] Training kernel models (Nyström, lean features) ...")
-    X_lean_tr_sc = sc_lean.transform(X_lean_tr)
-    X_lean_te_sc = sc_lean.transform(X_lean_te)
-
-    # Kernel hyperparameters re-tuned by CV grid search for the 8-feature set.
-    # Adding city_freq_x_lp changed the scale distribution requiring re-tuning.
-    # RBF: gamma=0.05 (~1/n_features), Ridge alpha=0.1
-    # Poly: degree=3, gamma=0.05, coef0=1 (coef0=0 causes numerical blow-up
-    #        with the freq×price interaction term's scale), Ridge alpha=10
-    rbf_model  = make_pipeline(
-        Nystroem(kernel='rbf', gamma=0.05, n_components=500, random_state=SEED),
-        Ridge(alpha=0.1)
-    )
-    poly_model = make_pipeline(
-        Nystroem(kernel='poly', degree=3, gamma=0.05, coef0=1, n_components=500, random_state=SEED),
-        Ridge(alpha=10)
-    )
-    rbf_model.fit(X_lean_tr_sc, y_tr)
-    poly_model.fit(X_lean_tr_sc, y_tr)
-    rbf_train  = mape(y_tr, rbf_model.predict(X_lean_tr_sc))
-    rbf_test   = mape(y_te, rbf_model.predict(X_lean_te_sc))
-    poly_train = mape(y_tr, poly_model.predict(X_lean_tr_sc))
-    poly_test  = mape(y_te, poly_model.predict(X_lean_te_sc))
-
-    # CV with per-fold re-encoding — consistent with lasso_select.
-    # Target encodings are data-dependent so must be re-fitted inside each fold.
-    kf = KFold(n_splits=5, shuffle=True, random_state=SEED)
-    rbf_cv_scores, poly_cv_scores = [], []
-    idx = np.arange(len(train_df))
-    for ti, vi in kf.split(idx):
-        tr_f = train_df.iloc[ti].copy()
-        va_f = train_df.iloc[vi].copy()
-        tr_f, va_f = add_encodings(tr_f, va_f)
-        sc_f = StandardScaler()
-        Xf_tr = sc_f.fit_transform(tr_f[LEAN_FEATURES].values)
-        Xf_va = sc_f.transform(va_f[LEAN_FEATURES].values)
-        m_rbf = make_pipeline(
-            Nystroem(kernel='rbf', gamma=0.05, n_components=500, random_state=SEED), Ridge(alpha=0.1)
-        ).fit(Xf_tr, y_tr[ti])
-        rbf_cv_scores.append(mape(y_tr[vi], m_rbf.predict(Xf_va)))
-        m_poly = make_pipeline(
-            Nystroem(kernel='poly', degree=3, gamma=0.05, coef0=1, n_components=500, random_state=SEED), Ridge(alpha=10)
-        ).fit(Xf_tr, y_tr[ti])
-        poly_cv_scores.append(mape(y_tr[vi], m_poly.predict(Xf_va)))
-    rbf_cv  = np.mean(rbf_cv_scores)
-    poly_cv = np.mean(poly_cv_scores)
-    print(f"  RBF Kernel  — train={rbf_train:.4f}%  CV={rbf_cv:.4f}%  test={rbf_test:.4f}%")
-    print(f"  Poly Kernel — train={poly_train:.4f}%  CV={poly_cv:.4f}%  test={poly_test:.4f}%")
-
     # ── Figures ──────────────────────────────────────────────────
-    print("\n[7] Generating output figures ...")
+    print("\n[6] Generating output figures ...")
     plot_mape_vs_nfeats(path_df, lean_n=len(LEAN_FEATURES), lean_test=lean_test_mape, lean_cv=elbow_cv)
     plot_coefficients(ridge_lean, LEAN_FEATURES, sc_lean)
     lean_pred = ridge_lean.predict(sc_lean.transform(X_lean_te))
@@ -766,9 +1026,7 @@ def main():
     plot_segments(y_te, lean_pred)
 
     results_for_plot = [
-        {'name': f'Ridge\n({len(LEAN_FEATURES)} feats)', 'test_mape': lean_test_mape, 'color': PALETTE[0]},
-        {'name': 'RBF\nKernel',       'test_mape': rbf_test,                'color': PALETTE[0]},
-        {'name': 'Poly\nKernel',      'test_mape': poly_test,               'color': PALETTE[0]},
+        {'name': f'Lean Ridge\n({len(LEAN_FEATURES)} feats)', 'test_mape': lean_test_mape, 'color': PALETTE[0]},
         {'name': 'XGB\nConservative', 'test_mape': XGB_CONSERVATIVE_TEST,   'color': PALETTE[1]},
         {'name': 'XGB Early\nStop',   'test_mape': XGB_EARLY_STOP_TEST,     'color': PALETTE[1]},
     ]
@@ -781,8 +1039,6 @@ def main():
     print(f"  {'Model':<40} {'Test MAPE':>10}")
     print("  " + "-" * 52)
     print(f"  {f'Lean Ridge ({n_lean} feats) — PRIMARY':<40} {lean_test_mape:>9.3f}%")
-    print(f"  {f'RBF Kernel (Nyström, {n_lean} feats)':<40} {rbf_test:>9.3f}%")
-    print(f"  {f'Poly Kernel (Nyström, {n_lean} feats)':<40} {poly_test:>9.3f}%")
     print(f"  {'XGB Conservative (benchmark)':<40} {XGB_CONSERVATIVE_TEST:>10.3f}%")
     print(f"  {'XGB Early Stopping (benchmark)':<40} {XGB_EARLY_STOP_TEST:>10.3f}%")
     print(f"\n  Lean Ridge vs XGB Conservative: {lean_test_mape - XGB_CONSERVATIVE_TEST:+.3f}pp")
@@ -796,8 +1052,6 @@ def main():
         'lean_n': len(LEAN_FEATURES),
         'lean_features': LEAN_FEATURES,
         'candidate_n': len(CANDIDATE_FEATURES),
-        'rbf_test': rbf_test, 'rbf_train': rbf_train, 'rbf_cv': rbf_cv,
-        'poly_test': poly_test, 'poly_train': poly_train, 'poly_cv': poly_cv,
         'xgb_conservative': XGB_CONSERVATIVE_TEST, 'xgb_early_stop': XGB_EARLY_STOP_TEST,
     }
     with open('results.json', 'w') as f:

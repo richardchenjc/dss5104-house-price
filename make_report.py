@@ -25,10 +25,6 @@ R.setdefault('candidate_n', 29)
 R.setdefault('lean_alpha', 50)
 R.setdefault('lean_se', 0.81)
 R.setdefault('alpha_tuning_cv', R.get('lean_cv', 18.77))
-R.setdefault('rbf_cv',  R.get('rbf_test',  16.88))
-R.setdefault('poly_cv', R.get('poly_test',  16.83))
-R.setdefault('rbf_train',  R.get('rbf_test',  16.45))
-R.setdefault('poly_train', R.get('poly_test',  17.32))
 
 W, H = A4
 LM = RM = 2.5*cm
@@ -66,14 +62,14 @@ ABSTRACT= sty('ABSTRACT','Normal', fontSize=9,  textColor=BLACK,
 ABS_HDR = sty('ABS_HDR', 'Normal', fontSize=9,  textColor=NAVY,
                fontName='Helvetica-Bold', spaceAfter=3, alignment=TA_CENTER)
 H1      = sty('H1', 'Heading1', fontSize=11, textColor=NAVY,
-               fontName='Helvetica-Bold', spaceBefore=6, spaceAfter=3,
+               fontName='Helvetica-Bold', spaceBefore=5, spaceAfter=2,
                borderPad=0)
 H2      = sty('H2', 'Heading2', fontSize=10, textColor=BLUE,
                fontName='Helvetica-Bold', spaceBefore=5, spaceAfter=2)
 BODY    = sty('BODY',   'Normal', fontSize=9.5, leading=13.0,
-               spaceAfter=4, alignment=TA_JUSTIFY, textColor=BLACK)
+               spaceAfter=3, alignment=TA_JUSTIFY, textColor=BLACK)
 CAPTION = sty('CAPTION','Normal', fontSize=8,   leading=11,
-               spaceAfter=4, alignment=TA_CENTER, textColor=DGREY,
+               spaceAfter=2, alignment=TA_CENTER, textColor=DGREY,
                fontName='Helvetica-Oblique')
 BULLET  = sty('BULLET', 'Normal', fontSize=9.5, leading=14,
                leftIndent=14, firstLineIndent=-10,
@@ -156,14 +152,13 @@ story.append(P(
     'residential house price prediction task through systematic feature engineering, '
     'regularisation, and ensemble methods, while maintaining interpretability. '
     'Applied to a deduplicated dataset of 4,553 property transactions in King County, '
-    f'Washington, we construct a {R["lean_n"]}-feature Ridge model — three of whose features '
-    'are KNN comparable-sales summaries fitted on training data only — achieving a test-set '
-    f'Mean Absolute Percentage Error (MAPE) of {R["lean_test"]:.2f}%. Kernel extensions '
-    f'reach {min(R["rbf_test"],R["poly_test"]):.2f}%. '
+    f'Washington, we construct a {R["lean_n"]}-feature Ridge model — combining KNN '
+    'comparable-sales summaries, street direction encodings, and demand proxies — '
+    f'achieving a test-set MAPE of {R["lean_test"]:.2f}%. '
     'A data integrity audit revealed that the original 9,102-row dataset was an exact '
     'duplication of 4,553 unique records, inflating tree-based benchmarks by an estimated '
-    '3–4 percentage points. On the clean data, our best linear model trails a properly '
-    f'regularised XGBoost benchmark by {min(R["rbf_test"],R["poly_test"]) - R["xgb_early_stop"]:+.1f} percentage points, '
+    '3–4 percentage points. On the clean data, our Lean Ridge model trails a properly '
+    f'regularised XGBoost benchmark by {R["lean_test"] - R["xgb_early_stop"]:+.1f} percentage points, '
     'while offering full coefficient-level interpretability. Lasso path analysis '
     f'identifies a statistical elbow at {R["lean_n"]} features; beyond it, '
     'every marginal gain falls below one cross-validation standard error.',
@@ -292,46 +287,55 @@ story.append(P(
 # ══════════════════════════════════════════════════════════════════
 story.append(numbered_section(3, 'Exploratory Data Analysis'))
 story.append(P(
-    'Exploratory analysis served as the primary motivation for feature engineering '
-    'decisions. Three findings had the most significant methodological implications.'
+    'Exploratory analysis directly motivated each group of engineered features. '
+    'Sale prices range from $7,800 to $26.6 million (median $465K, mean $558K) '
+    'with strong right skew; log-transforming the target produces a near-Gaussian '
+    'distribution and aligns the objective with MAPE\'s emphasis on relative error.'
 ))
-story += fig('figures/fig_price_dist.png', 14.5, aspect=0.42,
-    caption='Figure 1. Left: raw price distribution exhibiting strong right skew '
-            '(mean $558K, median $465K). Right: log-price is approximately Gaussian, '
-            'validating the choice of log(price) as modelling target.')
-story.append(SP(0.1))
 story += fig('figures/fig_eda_insights.png', 14.5, aspect=0.36,
-    caption='Figure 2. Three EDA findings driving feature engineering: '
-            '(a) U-shaped age–price curve; (b) non-linear condition premium with '
-            'disproportionate jump at score 5; (c) 6× price range across cities.')
+    caption='Figure 1. (a) U-shaped age–price curve motivating log_house_age and is_new; '
+            '(b) non-linear condition premium with disproportionate jump at score 5 '
+            'motivating top_condition; (c) 6× median price range across cities motivating target encoding.')
 story.append(SP(0.1))
 story.append(P(
-    '<b>Price distribution.</b> Sale prices range from $7,800 to $26.6 million '
-    '(median $465K, mean $558K) with strong right skew. Log-transforming the '
-    'target produces a near-Gaussian distribution, stabilises variance across '
-    'the price range, and aligns the training objective with MAPE\'s emphasis '
-    'on relative error.'
+    '<b>Age–price non-linearity (Figure 1a).</b> '
+    'New builds (age ≤ 5) and pre-1920 character properties command premiums above '
+    'mid-century construction — motivating log_house_age and is_new. '
+    '<b>Condition non-linearity (Figure 1b).</b> '
+    'A disproportionate jump at condition 5 motivates top_condition and the '
+    'condition × age interaction. '
+    '<b>Location heterogeneity (Figure 1c).</b> '
+    'A 6× price range across cities motivates raw target encoding for city and ZIP.'
 ))
+story += fig('figures/fig_eda_size_view_reno.png', 16.0, aspect=0.54,
+    caption='Figure 2. Top: (a) concave size–price curve motivating log + log² terms; '
+            '(b) log(sqft) linearises vs log(price), validating log transform; '
+            '(c) sqft per bedroom (r=0.59) motivates space-quality ratio. '
+            'Bottom: (d) non-linear view premium ladder motivating ordinal view feature; '
+            '(e) 159% waterfront premium motivating binary flag; '
+            '(f) renovation recency premium motivating recent_reno over raw binary flag.')
+story.append(SP(0.1))
 story.append(P(
-    '<b>Age–price non-linearity.</b> Figure 2a reveals a U-shaped relationship: '
-    'both new builds (age ≤ 5 years) and pre-1920 character properties command '
-    'premiums above mid-century construction. This motivates log_house_age as '
-    'the primary age feature (compresses the right tail) alongside a binary '
-    'is_new indicator for the new-build premium.'
+    '<b>Size (Figures 2a–2c).</b> Concave size–price curve; log-transforming yields '
+    'r = 0.66 and motivates log_sqft_living_sq for residual curvature. '
+    'sqft_per_bedroom independently captures layout quality. '
+    '<b>View and waterfront (Figures 2d–2e).</b> '
+    'View premium rises non-linearly from $445K (score 0) to $1.15M (score 4); '
+    'waterfront commands 159% premium — both retained as independent features. '
+    '<b>Renovation recency (Figure 2f).</b> Raw renovation binary is a poor predictor '
+    '(renovated median $440K vs $485K overall — confounded with age). '
+    'Recent renovations (≤5 years) do command a premium, motivating recent_reno.'
 ))
+story += fig('figures/fig_eda_direction.png', 14.5, aspect=0.44,
+    caption='Figure 3. Mean sale price ($M) by ZIP code and street compass direction. '
+            'Within-ZIP directional spreads average 26% in non-waterfront ZIPs — not '
+            'just lakefront areas — motivating zip_dir_lp and zip_dir_x_sqft features.')
+story.append(SP(0.1))
 story.append(P(
-    '<b>Condition non-linearity.</b> Figure 2b shows a disproportionate price '
-    'jump at condition score 5 relative to scores 3 and 4. A linear condition '
-    'term cannot capture this; a top_condition binary indicator and a '
-    'condition × house_age interaction together provide adequate flexibility '
-    'without overfitting.'
-))
-story.append(P(
-    '<b>Location heterogeneity.</b> Median prices vary by a factor of six across '
-    'cities (Figure 2c), with further ZIP-code-level variation within cities. '
-    'This dominance of location over physical attributes motivates raw '
-    'target encoding for both city and ZIP code, and a zip_city_diff feature '
-    'capturing fine-grained intra-city variation.'
+    '<b>Street direction (Figure 3).</b> Within-ZIP price variation by compass direction '
+    'averages 26% in non-waterfront ZIPs. Correlation with the waterfront binary is '
+    'only r = 0.05, confirming direction and waterfront are independent signals, '
+    'motivating the ZIP × direction target encoding.'
 ))
 
 # ══════════════════════════════════════════════════════════════════
@@ -410,25 +414,17 @@ story.append(P(
 story.append(numbered_subsection('4.3', 'Remaining Feature Groups'))
 story.append(P(
     'Key design decisions across the remaining groups: '
-    '<i>effective_age</i> uses the renovation year where a valid renovation exists '
-    '(yr_renovated ≥ yr_built), falling back to yr_built — this guards against '
-    'the 386 erroneous entries identified in Section 2.3. '
-    '<i>log_sqft_living_sq</i> (quadratic log term) captures diminishing returns '
-    'to floor area above ~3,000 sqft. '
-    '<i>cond_x_age</i> encodes the EDA finding that sustained upkeep over decades '
-    'commands a disproportionate premium. '
-    'Four KNN neighbourhood features — median and distance-weighted means of 10 '
-    'hyperlocal and 25 broader neighbours in a 10-dimensional property space — '
-    'are fitted on training data with leave-one-out on training rows and re-fitted '
-    'inside each CV fold to prevent leakage. '
-    'Seven collinear features were excluded after collinearity audit. '
-    'Four <b>frequency/demand features</b> encode the transaction count per ZIP/city '
-    'in training (a demand and liquidity proxy), log-transformed for a concave '
-    'relationship: <i>log_zip_freq</i>, <i>log_city_freq</i>, '
-    '<i>zip_freq_x_lp</i>, <i>city_freq_x_lp</i>. '
-    'The interaction term (frequency × price level) captures high-demand premium '
-    'neighbourhoods. Collinearity audit confirms all freq features r < 0.23 with '
-    'existing features — genuinely complementary signal. '
+    '<i>effective_age</i> uses the renovation year where valid, falling back to yr_built — '
+    'guarding against the 386 erroneous entries from Section 2.3. '
+    '<i>cond_x_age</i> encodes sustained upkeep commanding a disproportionate premium. '
+    'Four KNN features (median and distance-weighted means at k=10 and k=25) are fitted '
+    'on training data with leave-one-out and re-fitted per CV fold. '
+    'Four <b>frequency/demand features</b> encode log transaction count per ZIP/city; '
+    'interaction terms capture demand × price level (all r &lt; 0.23 with existing features). '
+    'Three <b>street direction features</b> extract the compass prefix from each street address '
+    '(96.4% coverage): <i>dir_lp</i> (target-encoded direction), <i>zip_dir_lp</i> (ZIP × direction '
+    'interaction — captures ZIP-specific directional premiums identified in EDA heatmap C), '
+    'and <i>zip_dir_x_sqft</i> (ZIP × direction × log(sqft)); partial r vs lean features = 0.16. '
     f'All {R["candidate_n"]} candidate features are listed in Table 3.'
 ))
 
@@ -456,6 +452,8 @@ cand_tbl = [
                             _c('Seasonal variation within the 70-day transaction window')],
     [_c('Frequency (4)'),   _c('log_zip_freq, log_city_freq,\nzip_freq_x_lp, city_freq_x_lp'),
                             _c('Transaction count per ZIP/city (demand/liquidity proxy), log-transformed. Interaction terms encode demand x neighbourhood price level. All r < 0.23 with existing features.')],
+    [_c('Direction (3)'),   _c('dir_lp, zip_dir_lp, zip_dir_x_sqft'),
+                            _c('Street compass direction (96.4% coverage). dir_lp: target-encoded direction. zip_dir_lp: ZIP x direction interaction — captures directional premiums within ZIPs (motivated by EDA heatmap). zip_dir_x_sqft: ZIP x direction x log(sqft).')],
     [_c('KNN (4)'),         _c('knn_median, knn_weighted_mean,\nknn_broad_weighted, knn_local_vs_broad'),
                             _c('Dual-scale comparable-sales summaries: hyperlocal (k=10) and broader (k=25) in 10-dim standardised property space. Fitted on training data; leave-one-out; re-fitted per CV fold.')],
 ]
@@ -479,7 +477,7 @@ story.append(P(
     'supported by SE analysis.'
 ))
 story += fig('figures/fig_mape_vs_nfeats.png', 14.5,
-    f'Figure 3. CV MAPE (with ±1 SE bands) and test MAPE as a function of feature '
+    f'Figure 4. CV MAPE (with ±1 SE bands) and test MAPE as a function of feature '
     f'count along the Lasso path. The geometric elbow occurs at n={R["lean_n"]}, '
     f'the point of maximum curvature. Beyond the elbow every marginal gain is '
     f'smaller than 0.5 SE — statistically indistinguishable from fold-sampling noise.')
@@ -525,6 +523,8 @@ surv_tbl = [
                         _c(', '.join([f for f in ['knn_median','knn_weighted_mean','knn_broad_weighted','knn_local_vs_broad'] if f not in _surv]) or '—')],
     [_c('Frequency'),   _c(_group(_surv, ['log_zip_freq','log_city_freq','zip_freq_x_lp','city_freq_x_lp'])),
                         _c(', '.join([f for f in ['log_zip_freq','log_city_freq','zip_freq_x_lp','city_freq_x_lp'] if f not in _surv]) or '—')],
+    [_c('Direction'),   _c(_group(_surv, ['dir_lp','zip_dir_lp','zip_dir_x_sqft'])),
+                        _c(', '.join([f for f in ['dir_lp','zip_dir_lp','zip_dir_x_sqft'] if f not in _surv]) or '—')],
 ]
 story.append(make_table(surv_tbl, [2.4*cm, 6.0*cm, 7.6*cm], fs=8.0))
 story.append(Cap(
@@ -555,24 +555,12 @@ story.append(P(
     'α ∈ {0.01, 0.1, 0.5, 1, 5, 10, 50, 100}.'
 ))
 
-story.append(numbered_subsection('5.3', 'Kernel Methods (Nyström Approximation)'))
-story.append(P(
-    'As a performance extension, RBF and polynomial kernel approximations '
-    'are applied via the Nyström method (500 components), which maps the '
-    'feature space into a higher-dimensional representation where linear '
-    'regression can capture complex non-linear interactions. Both methods '
-    'comply with the linear model constraint. The kernel models use the same '
-    f'{R["lean_n"]} elbow-selected features as the lean Ridge model — the kernel '
-    'expands the hypothesis space to capture non-linear interactions, but does '
-    'not alter the input feature set, keeping selection and modelling decisions consistent.'
-))
-
-story.append(numbered_subsection('5.4', 'Validation Protocol'))
+story.append(numbered_subsection('5.3', 'Validation Protocol'))
 story.append(P(
     'All hyperparameter selection uses 5-fold cross-validation on the '
     'training set. Features requiring data-dependent fitting (target '
-    'encodings, Nyström approximations, scalers) are re-fitted inside '
-    'each fold. Test-set performance is reported only for the final '
+    'encodings, KNN, scalers) are re-fitted inside each fold. '
+    'Test-set performance is reported only for the final '
     'model with the selected hyperparameters; the test set is never '
     'used for model selection decisions.'
 ))
@@ -586,17 +574,9 @@ res_data = [
     ['Model', 'Features', 'CV MAPE', 'Train MAPE', 'Test MAPE', 'Gap (Test−Train)'],
     ['Lean Ridge (primary)',  f'{R["lean_n"]}', f'{R["lean_cv"]:.2f}%',
      f'{R["lean_train"]:.2f}%', f'{R["lean_test"]:.2f}%', f'{R["lean_test"]-R["lean_train"]:+.2f}pp'],
-    ['RBF Kernel (Nyström)',  f'{R["lean_n"]}', f'{R["rbf_cv"]:.2f}%',
-     f'{R["rbf_train"]:.2f}%', f'{R["rbf_test"]:.2f}%',  f'{R["rbf_test"]-R["rbf_train"]:+.2f}pp'],
-    ['Poly Kernel (Nyström)', f'{R["lean_n"]}', f'{R["poly_cv"]:.2f}%',
-     f'{R["poly_train"]:.2f}%',f'{R["poly_test"]:.2f}%', f'{R["poly_test"]-R["poly_train"]:+.2f}pp'],
 ]
 rt = make_table(res_data, [4.5*cm, 2.2*cm, 2.4*cm, 2.4*cm, 2.4*cm, 2.3*cm])
 rt.setStyle(TableStyle([
-    ('BACKGROUND', (0,1), (-1,1), WHITE),
-    ('BACKGROUND', (0,2), (-1,2), LGREY),
-    ('BACKGROUND', (0,3), (-1,3), WHITE),
-    # Lean Ridge (primary) row highlighted
     ('BACKGROUND', (0,1), (-1,1), HexColor('#e8f7ed')),
     ('FONTNAME',   (0,1), (-1,1), 'Helvetica-Bold'),
     ('ALIGN',      (1,0), (-1,-1), 'CENTER'),
@@ -604,21 +584,20 @@ rt.setStyle(TableStyle([
 ]))
 story.append(KeepTogether([
     rt,
-    Cap(f'Table 5. Linear model results on the deduplicated dataset (4,553 properties, '
-        f'80/20 split, seed=42). All three models use the same {R["lean_n"]} elbow-selected features. '
+    Cap(f'Table 5. Lean Ridge results on the deduplicated dataset (4,553 properties, '
+        f'80/20 split, seed=42). {R["lean_n"]} elbow-selected features, α={R["lean_alpha"]}. '
         f'Gap = Test MAPE − Train MAPE; the negative value on this seed reflects split-composition '
-        f'noise (seed stability testing shows the average gap is near zero across six splits). '
+        f'noise (average gap near zero across six random splits). '
         f'XGBoost benchmark results are in Table 8 (Section 8).'),
 ]))
 story += [SP(0.15)]
 
 story += fig('figures/fig_comparison.png', 14.5,
-    f'Figure 4. Left: test MAPE for all models — Lean Ridge ({R["lean_test"]:.2f}%), '
-    f'RBF Kernel ({R["rbf_test"]:.2f}%), Poly Kernel ({R["poly_test"]:.2f}%), '
-    'and XGBoost benchmarks. Right: XGBoost train vs test MAPE — '
-    'the Default configuration (train=5.6%, test=15.5%) is severely overfit, '
-    'making it a misleading benchmark; the Conservative and Early Stopping '
-    'configurations are honest comparators.')
+    f'Figure 5. Left: test MAPE for Lean Ridge ({R["lean_test"]:.2f}%) and XGBoost benchmarks. '
+    'Right: XGBoost train vs test MAPE — Default configuration (train=5.6%, test=15.5%) '
+    'is severely overfit, making it a misleading benchmark; Conservative and Early Stopping '
+    'are honest comparators. Lean Ridge trails XGB Conservative by only '
+    f'{R["lean_test"]-R["xgb_conservative"]:+.2f} pp.')
 story.append(SP(0.1))
 
 story.append(P(
@@ -627,13 +606,10 @@ story.append(P(
     'This sign is not a structural property: seed stability across six splits shows the gap '
     'averaging near zero (three negative, three positive), driven by split-composition noise '
     'with 911 test rows. When negative, three mechanisms contribute — '
-    '(1) alpha=100 deliberately inflates training error via L2 shrinkage; '
+    '(1) α=100 deliberately inflates training error via L2 shrinkage; '
     '(2) KNN leave-one-out gives training rows slightly noisier features; '
     '(3) MAPE in price-space versus log-space optimisation. '
-    'Kernel methods reduce test MAPE '
-    f'to {min(R["rbf_test"],R["poly_test"]):.2f}% by capturing non-linear interactions, '
-    'at the cost of coefficient interpretability. '
-    'Model interpretation in Section 7 uses the standalone Lean Ridge.'
+    'XGBoost benchmarks are discussed in Section 8.'
 ))
 
 story.append(numbered_subsection('6.1', 'Performance by Price Segment'))
@@ -663,16 +639,15 @@ story.append(P(
     'all other features constant.'
 ))
 
-story += fig('figures/fig_coef.png', 14.5, aspect=0.52,
-    caption=f'Figure 5. Standardised Ridge coefficients for the lean {R["lean_n"]}-feature model. '
-            'All 8 coefficients are positive — every selected feature contributes to higher price. '
-            'zip_x_sqft (location × size interaction) carries the largest weight, followed by '
-            'knn_broad_weighted and zip_lp, confirming that location and comparable-sales signals '
-            'are the primary price drivers. waterfront and city_freq_x_lp carry smaller but '
-            'genuine independent contributions.')
+story += fig('figures/fig_coef.png', 14.5, aspect=0.46,
+    caption=f'Figure 6. Standardised Ridge coefficients for the lean {R["lean_n"]}-feature model. '
+            'All 12 coefficients are positive. The two direction interaction features '
+            '(zip_dir_x_sqft and zip_dir_lp) dominate, followed by the KNN comparable-sales '
+            'features — confirming that directional orientation within a ZIP and '
+            'comparable nearby sales are the primary price drivers.')
 story.append(SP(0.1))
 story += fig('figures/fig_diagnostics.png', 14.5, aspect=0.46,
-    caption='Figure 6. Left: predicted vs actual prices. The model tracks typical homes '
+    caption='Figure 7. Left: predicted vs actual prices. The model tracks typical homes '
             'well; luxury properties above $3M are systematically underestimated due to '
             'unobserved idiosyncratic factors. Right: residual plot — no systematic '
             'heteroscedasticity in the core $200K–$1M range.')
@@ -681,34 +656,38 @@ story.append(SP(0.1))
 story.append(numbered_subsection('7.1', 'Feature Importance'))
 feat_interp = [
     [_h('Feature'), _h('Dir.'), _h('Interpretation')],
-    [_c('zip_x_sqft'),        _c('+'), _c('ZIP encoding × log(sqft_living): location multiplies the value of size — extra space in an expensive ZIP contributes more value than in a cheap neighbourhood. Largest standardised coefficient.')],
+    [_c('zip_dir_x_sqft'),    _c('+'), _c('ZIP × direction × log(sqft): directional premium scales with size. Largest coefficient. EDA heatmap shows NW/W streets in 98006/98033 face lake/mountains — directional effect amplified for larger homes')],
+    [_c('zip_dir_lp'),        _c('+'), _c('ZIP × direction target encoding: ZIP-specific directional premium. Primary carrier of the directional signal identified in EDA heatmap C')],
     [_c('knn_broad_weighted'),_c('+'), _c('Distance-weighted mean log-price of 25 broader neighbours (k=25): captures wider neighbourhood price context, complementing the hyperlocal KNN signal')],
-    [_c('zip_lp'),            _c('+'), _c('ZIP code mean log-price (target encoding): provides the neighbourhood price baseline; complements KNN when comparables are sparse or atypical')],
-    [_c('knn_weighted_mean'), _c('+'), _c('Distance-weighted mean log-price of 10 nearest neighbours: closer comparables receive higher weight, giving finer micro-market resolution than a simple median')],
-    [_c('sqft_per_bedroom'),  _c('+'), _c('Living area per bedroom: proxy for bedroom spaciousness and layout quality; captures the market preference for fewer, larger rooms')],
-    [_c('knn_median'),        _c('+'), _c('Median log-price of 10 nearest comparable properties (k=10 hyperlocal): directly encodes what similar nearby homes sold for — the same heuristic used by professional appraisers')],
-    [_c('city_freq_x_lp'),    _c('+'), _c('City transaction frequency × city price level: captures demand-driven premiums in high-liquidity, high-price cities. Collinearity r < 0.23 with all other features.')],
-    [_c('waterfront'),        _c('+'), _c('Waterfront binary: commands a large, idiosyncratic premium not fully absorbed by KNN or ZIP encoding from comparables alone. Smallest standardised coefficient.')],
+    [_c('knn_weighted_mean'), _c('+'), _c('Distance-weighted mean log-price of 10 nearest neighbours: closer comparables weighted more heavily, giving finer micro-market resolution than median')],
+    [_c('log_sqft_above'),    _c('+'), _c('Log above-ground living area: separates the above-ground premium from basement space, which buyers value less per square foot')],
+    [_c('city_freq_x_lp'),    _c('+'), _c('City transaction frequency × city price level: demand/liquidity proxy. High-frequency, high-price cities command premium beyond ZIP encoding')],
+    [_c('sqft_per_bedroom'),  _c('+'), _c('Living area per bedroom: spaciousness and layout quality proxy; captures preference for fewer, larger rooms')],
+    [_c('knn_median'),        _c('+'), _c('Median log-price of 10 nearest comparable properties (k=10): directly encodes the comparable-sales heuristic used by professional appraisers')],
+    [_c('view'),              _c('+'), _c('Ordinal view score (0–4): view premium independent of directional orientation')],
+    [_c('condition'),         _c('+'), _c('Property condition (1–5): physical upkeep premium, independent of age and size')],
+    [_c('dir_lp'),            _c('+'), _c('Target-encoded street direction: average directional premium across all ZIPs; fallback for ZIPs with few directional observations')],
+    [_c('waterfront'),        _c('+'), _c('Waterfront binary: idiosyncratic premium not absorbed by direction or KNN. Smallest coefficient.')],
 ]
 story.append(make_table(feat_interp, [3.0*cm, 1.2*cm, 11.8*cm], fs=8.5))
-story.append(Cap(f'Table 7. All {R["lean_n"]} elbow-selected features. Three KNN comparable-sales features, three location/size features, one waterfront binary, and one frequency demand proxy (city_freq_x_lp).'))
+story.append(Cap(f'Table 7. All {R["lean_n"]} elbow-selected features, ordered by standardised coefficient magnitude. Three KNN comparable-sales features, three location/size features, one waterfront binary, one frequency demand proxy, and three street-direction features.'))
 
 story.append(numbered_subsection('7.2', 'Key Insights for Stakeholders'))
 story.append(P(
-    '<b>Comparable sales and market demand dominate.</b> Three of the 8 lean features '
-    'are KNN comparable-sales statistics (knn_median, knn_weighted_mean, knn_broad_weighted) — '
-    'directly encoding what similar nearby homes sold for, the same heuristic used by '
-    'professional appraisers. The fourth demand-related feature, city_freq_x_lp, captures '
-    'how actively traded a city is multiplied by its price level: high-frequency, '
-    'high-price cities command an additional premium beyond what ZIP encoding and KNN alone capture.'
+    '<b>Street orientation within a ZIP is the strongest single price predictor.</b> '
+    'The two top-ranked features — zip_dir_x_sqft and zip_dir_lp — encode the compass '
+    'direction of the street within its ZIP code. In King County, NW and W streets in '
+    'high-value ZIPs (e.g. 98006, 98033) face Lake Washington and the Cascades, '
+    'commanding premiums of $200K+ over comparable properties on other orientations. '
+    'This directional effect scales with size: a larger home on a premium-direction '
+    'street benefits disproportionately more than a smaller one.'
 ))
 story.append(P(
-    '<b>Location multiplies the value of size.</b> The zip_x_sqft interaction '
-    'demonstrates that an additional 500 sqft in an expensive ZIP contributes '
-    'more to value than the same space in a cheaper neighbourhood. '
-    'Location does not merely add a fixed premium — it scales the marginal '
-    'value of every attribute. This encodes one of the most actionable insights '
-    'in real estate: the same renovation yields very different returns depending on neighbourhood.'
+    '<b>Comparable sales and market demand remain core signals.</b> Three KNN '
+    'comparable-sales features (knn_broad_weighted, knn_weighted_mean, knn_median) '
+    'occupy ranks 3–4 and 8, directly encoding what similar nearby homes sold for. '
+    'city_freq_x_lp (demand proxy) and sqft_per_bedroom (space quality) provide '
+    'complementary signals independent of the directional and KNN channels.'
 ))
 
 # ══════════════════════════════════════════════════════════════════
@@ -728,8 +707,6 @@ xgb_data = [
     ['Early Stopping (n=344)',          '11.21%', f'{R["xgb_early_stop"]:.2f}%',   '+4.08pp', 'Principled'],
     [f'Lean Ridge (ours, {R["lean_n"]} feats)', f'{R["lean_train"]:.2f}%',
      f'{R["lean_test"]:.2f}%', f'{R["lean_test"]-R["lean_train"]:+.2f}pp', 'Primary model'],
-    [f'RBF Kernel (ours, {R["lean_n"]} feats)', f'{R["rbf_train"]:.2f}%',
-     f'{R["rbf_test"]:.2f}%', f'{R["rbf_test"]-R["rbf_train"]:+.2f}pp', 'Best kernel'],
 ]
 xt = make_table(xgb_data, [5.2*cm, 2.1*cm, 2.1*cm, 2.4*cm, 4.2*cm])
 xt.setStyle(TableStyle([
@@ -737,19 +714,18 @@ xt.setStyle(TableStyle([
     ('FONTNAME',   (0,0), (-1,0), 'Helvetica-Bold'),
     ('FONTSIZE',   (0,0), (-1,-1), 8.5),
     ('ROWBACKGROUNDS', (0,1), (-1,4), [WHITE, LGREY]),
-    ('BACKGROUND', (0,5), (-1,6), HexColor('#e8f7ed')),
-    ('FONTNAME',   (0,5), (-1,6), 'Helvetica-Bold'),
+    ('BACKGROUND', (0,5), (-1,5), HexColor('#e8f7ed')),
+    ('FONTNAME',   (0,5), (-1,5), 'Helvetica-Bold'),
     ('GRID',       (0,0), (-1,-1), 0.3, MGREY),
     ('TOPPADDING', (0,0), (-1,-1), 4), ('BOTTOMPADDING', (0,0), (-1,-1), 4),
     ('LEFTPADDING', (0,0), (-1,-1), 6),
     ('ALIGN',      (1,0), (3,-1), 'CENTER'), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
 ]))
 story.append(xt)
-story.append(Cap('Table 8. XGBoost configurations versus linear models. '
+story.append(Cap('Table 8. XGBoost configurations versus Lean Ridge. '
                  'The Default configuration\'s 9.86pp train/test gap reveals memorisation; '
                  'only the Conservative and Early Stopping configurations are valid benchmarks. '
-                 'The RBF kernel (our best model) trails XGB Conservative by only '
-                 f'{R["rbf_test"] - R["xgb_conservative"]:+.2f} pp.'))
+                 f'Lean Ridge trails XGB Conservative by only {R["lean_test"]-R["xgb_conservative"]:+.2f} pp.'))
 story.append(SP(0.1))
 story.append(P(
     'The XGBoost Default configuration achieves a training MAPE of 5.63% while '
@@ -758,8 +734,8 @@ story.append(P(
     'demonstrates that XGBoost can overfit. The Conservative configuration '
     f'(depth=4, heavy regularisation) provides an honest comparator at {R["xgb_conservative"]:.2f}% '
     'test MAPE with a negligible 0.57 pp gap. Compared to this configuration, '
-    f'our best kernel model ({min(R["rbf_test"],R["poly_test"]):.2f}%) trails by '
-    f'{min(R["rbf_test"],R["poly_test"]) - R["xgb_conservative"]:+.2f} pp — a difference that disappears '
+    f'our Lean Ridge model ({R["lean_test"]:.2f}%) trails by '
+    f'{R["lean_test"] - R["xgb_conservative"]:+.2f} pp — a difference that disappears '
     'within typical cross-validation variance.'
 ))
 story.append(P(
@@ -770,7 +746,7 @@ story.append(P(
     'XGBoost approximates through its tree splits. Once this information '
     'is encoded explicitly in the feature set, XGBoost\'s advantage in '
     'discovering neighbourhood structure is largely pre-empted. '
-    f'The residual gap ({R["rbf_test"]-R["xgb_conservative"]:+.2f} pp to Conservative XGBoost) likely reflects '
+    f'The residual gap ({R["lean_test"]-R["xgb_conservative"]:+.2f} pp to Conservative XGBoost) likely reflects '
     'genuinely unobserved factors — unique architectural details, specific '
     'lot characteristics — rather than recoverable structure.'
 ))
@@ -781,27 +757,22 @@ story.append(P(
 story.append(numbered_section(9, 'Conclusion'))
 story.append(P(
     f'This paper demonstrates that a {R["lean_n"]}-feature Ridge regression model — '
-    f'three of whose features are KNN comparable-sales summaries and one a frequency-based '
-    f'demand proxy — achieves {R["lean_test"]:.2f}% '
-    f'MAPE on house price prediction, with kernel extensions reaching {min(R["rbf_test"],R["poly_test"]):.2f}%. '
-    'The gap between our best model and a properly regularised XGBoost benchmark is '
-    f'{min(R["rbf_test"],R["poly_test"]) - R["xgb_conservative"]:+.2f} pp — achieved without a single tree-based component. '
-    'Four methodological contributions underpin this result. '
-    'First, a data integrity audit identified and corrected an artificial 50% duplication '
-    'in the raw dataset, reducing the apparent XGBoost advantage from 5+ pp to approximately 1 pp. '
-    'Second, adding KNN comparable-sales features to the candidate pool produced a '
-    'statistically detectable CV MAPE improvement of 0.87 pp, closing the gap '
-    'to XGBoost Conservative from 2.0 pp to under 1 pp. '
-    'Third, adding a frequency demand proxy (city transaction count × city price level) '
-    'contributed a further −0.30 pp CV improvement, with the RBF kernel now matching '
-    f'XGB Conservative at {R["rbf_test"]:.2f}% test MAPE. '
-    'Fourth, the most influential features are KNN comparable-sales summaries — '
-    'encoding the same heuristic that human appraisers use: what did similar nearby homes '
-    'sell for? These features are transparent, leak-free, and interpretable in terms '
-    'that stakeholders already understand. '
-    'A model built on explicit domain knowledge is not only accurate; '
-    'it is interpretable, auditable, and defensible in regulated settings where prediction '
-    'alone is insufficient.'
+    f'combining KNN comparable-sales summaries, street direction encodings, and demand proxies — '
+    f'achieves {R["lean_test"]:.2f}% test MAPE, trailing a properly regularised XGBoost benchmark '
+    f'by only {R["lean_test"] - R["xgb_conservative"]:+.2f} pp — without a single tree-based component. '
+    'Five methodological contributions underpin this result. '
+    'First, a data integrity audit corrected an artificial 50% duplication, '
+    'reducing the apparent XGBoost advantage from 5+ pp to approximately 1 pp. '
+    'Second, KNN comparable-sales features produced a detectable CV improvement of 0.87 pp, '
+    'closing the gap to XGBoost Conservative from 2.0 pp to under 1 pp. '
+    'Third, a frequency demand proxy (city transaction count × price level) '
+    'contributed a further −0.30 pp CV improvement. '
+    'Fourth, street direction features (ZIP × compass direction, motivated by EDA Figure 3) '
+    f'contributed −0.26 pp, bringing the final gap to XGB Conservative to {R["lean_test"]-R["xgb_conservative"]:+.2f} pp. '
+    'Fifth, all dominant features — directional orientation, comparable sales, and demand — '
+    'encode the same heuristics human appraisers use. A model built on explicit domain '
+    'knowledge is not only accurate; it is interpretable, auditable, and defensible '
+    'in regulated settings where prediction alone is insufficient.'
 ))
 
 # ── Build ─────────────────────────────────────────────────────────
