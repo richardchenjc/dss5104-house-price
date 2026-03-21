@@ -151,6 +151,8 @@ story = []
 story += [SP(0.15)]
 story.append(P('House Price Prediction with Linear Models', TITLE))
 story.append(P('DSS5104 — Applied Linear Regression · Continuous Assessment 1', SUBTITLE))
+story.append(P('Chen Jui Chia A0333274H | Foo Toon Ming A0333225N | Huang Chen-Shuo A0333970B', AUTHORS))
+story.append(P('github.com/chenjui/dss5104-house-price-regression', AUTHORS))
 story.append(P('March 2026', DATE_S))
 story += [SP(0.2), HR(), SP(0.1)]
 
