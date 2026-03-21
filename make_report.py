@@ -599,19 +599,22 @@ story += [SP(0.15)]
 
 story += fig('figures/fig_comparison.png', 14.5,
     f'Figure 5. Left: test MAPE for Lean Ridge ({R["lean_test"]:.2f}%) and XGBoost benchmarks. '
-    'Right: XGBoost train vs test MAPE — Default configuration (train=5.6%, test=15.5%) '
-    'is severely overfit, making it a misleading benchmark; Conservative and Early Stopping '
-    f'XGB Tuned (randomised search, {R["xgb_tuned"]:.2f}%) is the primary benchmark. '
+    f'Right: XGBoost train vs test MAPE — Default configuration (train=1.9%, test=15.5%) '
+    f'is severely overfit (gap={R["xgb_all"].get("Default (depth=6)", {}).get("gap", 13.57):+.2f}pp); '
+    f'Tuned (randomised search, {R["xgb_tuned"]:.2f}%) is the primary benchmark. '
     f'Lean Ridge trails by only {R["lean_test"]-_xgb_primary:+.2f} pp.')
 story.append(SP(0.1))
 
 story.append(P(
     f'The lean {R["lean_n"]}-feature Ridge model achieves {R["lean_test"]:.2f}% test MAPE '
     f'with a train/test gap of {R["lean_test"]-R["lean_train"]:+.2f}pp (test better than train on this split). '
-    'This sign is not a structural property: seed stability across six splits shows the gap '
-    'averaging near zero (three negative, three positive), driven by split-composition noise '
-    'with 911 test rows. When negative, three mechanisms contribute — '
-    '(1) α=100 deliberately inflates training error via L2 shrinkage; '
+    f'Seed stability across six splits (seeds 42, 0, 1, 7, 13, 99) shows the gap '
+    f'averaging {R.get("stability_mean", 1.13):+.2f}pp '
+    f'({R.get("stability_n_neg", 2)} negative, {R.get("stability_n_pos", 4)} positive). '
+    f'Seed 42 produces a favourable split where the test set is somewhat easier than train; '
+    'the typical gap is positive, consistent with a well-generalising model. '
+    'The negative gap on this seed reflects three mechanisms — '
+    f'(1) α={R["lean_alpha"]} deliberately inflates training error via L2 shrinkage; '
     '(2) KNN leave-one-out gives training rows slightly noisier features; '
     '(3) MAPE in price-space versus log-space optimisation. '
     'XGBoost benchmarks are discussed in Section 8.'
@@ -719,9 +722,9 @@ _tuned_n    = _xgb.get('Tuned (randomised search)', {}).get('n_estimators_used',
 xgb_data = [
     ['Configuration', 'Train MAPE', 'Test MAPE', 'Train/Test Gap', 'Assessment'],
     ['Default (depth=6, n=500)',
-     _xv('Default (depth=6)', 'train_mape', '5.63%'),
+     _xv('Default (depth=6)', 'train_mape', '1.91%'),
      _xv('Default (depth=6)', 'test_mape',  '15.49%'),
-     _xv('Default (depth=6)', 'gap',        '+9.86pp'), 'Severely overfit'],
+     _xv('Default (depth=6)', 'gap',        '+13.57pp'), 'Severely overfit'],
     [f'Early Stopping (n={_es_n})',
      _xv('Early Stopping', 'train_mape', '11.21%'),
      f'{R["xgb_early_stop"]:.2f}%',
@@ -752,13 +755,13 @@ xt.setStyle(TableStyle([
 ]))
 story.append(xt)
 story.append(Cap(f'Table 8. XGBoost configurations versus Lean Ridge. '
-                 f'The Default configuration reveals severe memorisation (9.86 pp gap); '
+                 f'The Default configuration reveals severe memorisation ({R["xgb_all"]["Default (depth=6)"]["gap"]:+.2f} pp gap); '
                  f'the Tuned configuration ({R["xgb_tuned"]:.2f}% test MAPE) is the primary benchmark '
                  f'from a 50-iteration randomised search with 5-fold CV. '
                  f'Lean Ridge trails the tuned XGBoost by only {R["lean_test"]-_xgb_primary:+.2f} pp.'))
 story.append(SP(0.1))
 story.append(P(
-    'The Default configuration (train=5.63%, test=15.49%, gap=9.86pp) reveals severe '
+    f'The Default configuration (train={R["xgb_all"]["Default (depth=6)"]["train_mape"]:.2f}%, test={R["xgb_all"]["Default (depth=6)"]["test_mape"]:.2f}%, gap={R["xgb_all"]["Default (depth=6)"]["gap"]:+.2f}pp) reveals severe '
     'memorisation — not a valid upper bound. A 50-iteration randomised search over nine '
     'hyperparameters (depth, n_estimators, learning rate, subsample, colsample, '
     'min_child_weight, L1/L2, gamma), each evaluated by 5-fold CV with per-fold '

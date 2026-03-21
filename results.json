@@ -24,6 +24,17 @@
   "xgb_conservative": 15.179,
   "xgb_early_stop": 15.404,
   "xgb_tuned": 14.976,
+  "stability_gaps": [
+    -1.1499566456712795,
+    3.0783743824962464,
+    3.7405215038306387,
+    -0.8712027840456891,
+    1.1537606734121013,
+    0.8571529815358652
+  ],
+  "stability_n_neg": 2,
+  "stability_n_pos": 4,
+  "stability_mean": 1.1348,
   "xgb_all": {
     "Default (depth=6)": {
       "train_mape": 1.914,
