@@ -54,20 +54,21 @@ if os.path.exists('xgb_results.json'):
         _xgb = json.load(_f)
     XGB_CONSERVATIVE_TEST = _xgb['xgb_conservative']
     XGB_EARLY_STOP_TEST   = _xgb['xgb_early_stop']
+    XGB_TUNED_TEST        = _xgb.get('xgb_tuned', _xgb['xgb_conservative'])
     XGB_RESULTS = {
         name: (r['train_mape'], r['test_mape'])
         for name, r in _xgb['xgb_all'].items()
     }
 else:
-    # Fallback: pre-run values (depth=4 conservative and early stopping)
-    # Run xgboost_benchmark.py to replace these with reproducible values.
+    # Fallback: pre-run values. Run xgboost_benchmark.py to replace these.
     XGB_CONSERVATIVE_TEST = 15.621
     XGB_EARLY_STOP_TEST   = 15.284
+    XGB_TUNED_TEST        = 15.621   # same as conservative until search runs
     XGB_RESULTS = {
-        'Default (depth=6)':      (5.631,  15.493),
-        'Tuned (depth=7)':        (10.452, 15.376),
-        'Conservative (depth=4)': (15.051, 15.621),
-        'Early Stopping':         (11.206, 15.284),
+        'Default\n(depth=6)':       (5.631,  15.493),
+        'Conservative\n(depth=4)':  (15.051, 15.621),
+        'Early\nStopping':          (11.206, 15.284),
+        'Tuned\n(search)':          (15.621, 15.621),  # fallback = conservative
     }
 
 # ══════════════════════════════════════════════════════════════════
@@ -943,7 +944,15 @@ def plot_comparison(results):
 
     # Right: XGBoost train/test gap — loaded from xgb_results.json if available
     xgb_entries = list(XGB_RESULTS.items())
-    xgb_names = ['Default\n(depth=6)', 'Tuned\n(depth=7)', 'Conservative\n(depth=4)', 'Early\nStopping']
+    # Derive display names: use the dict key, inserting \n before parentheses for short labels
+    xgb_names = []
+    for name, _ in xgb_entries:
+        # Keys from xgb_results.json have full names; shorten for the chart
+        short = (name.replace('Default (depth=6)', 'Default\n(depth=6)')
+                     .replace('Conservative (depth=4)', 'Conserv.\n(depth=4)')
+                     .replace('Early Stopping', 'Early\nStopping')
+                     .replace('Tuned (randomised search)', 'Tuned\n(search)'))
+        xgb_names.append(short)
     xgb_train = [v[0] for _, v in xgb_entries]
     xgb_test  = [v[1] for _, v in xgb_entries]
     x = np.arange(len(xgb_names)); w = 0.32
@@ -1037,9 +1046,10 @@ def main():
     plot_segments(y_te, lean_pred)
 
     results_for_plot = [
-        {'name': f'Lean Ridge\n({len(LEAN_FEATURES)} feats)', 'test_mape': lean_test_mape, 'color': PALETTE[0]},
-        {'name': 'XGB\nConservative', 'test_mape': XGB_CONSERVATIVE_TEST,   'color': PALETTE[1]},
-        {'name': 'XGB Early\nStop',   'test_mape': XGB_EARLY_STOP_TEST,     'color': PALETTE[1]},
+        {'name': f'Lean Ridge\n({len(LEAN_FEATURES)} feats)', 'test_mape': lean_test_mape,   'color': PALETTE[0]},
+        {'name': 'XGB\nTuned',                                 'test_mape': XGB_TUNED_TEST,   'color': PALETTE[1]},
+        {'name': 'XGB\nConservative',                          'test_mape': XGB_CONSERVATIVE_TEST, 'color': PALETTE[1]},
+        {'name': 'XGB Early\nStop',                            'test_mape': XGB_EARLY_STOP_TEST,   'color': PALETTE[1]},
     ]
     plot_comparison(results_for_plot)
 
@@ -1050,32 +1060,36 @@ def main():
     print(f"  {'Model':<40} {'Test MAPE':>10}")
     print("  " + "-" * 52)
     print(f"  {f'Lean Ridge ({n_lean} feats) — PRIMARY':<40} {lean_test_mape:>9.3f}%")
-    print(f"  {'XGB Conservative (benchmark)':<40} {XGB_CONSERVATIVE_TEST:>10.3f}%")
-    print(f"  {'XGB Early Stopping (benchmark)':<40} {XGB_EARLY_STOP_TEST:>10.3f}%")
-    print(f"\n  Lean Ridge vs XGB Conservative: {lean_test_mape - XGB_CONSERVATIVE_TEST:+.3f}pp")
+    print(f"  {'XGB Tuned (randomised search)':<40} {XGB_TUNED_TEST:>10.3f}%")
+    print(f"  {'XGB Conservative (reference)':<40} {XGB_CONSERVATIVE_TEST:>10.3f}%")
+    print(f"  {'XGB Early Stopping (reference)':<40} {XGB_EARLY_STOP_TEST:>10.3f}%")
+    print(f"\n  Lean Ridge vs XGB Tuned:        {lean_test_mape - XGB_TUNED_TEST:+.3f}pp")
+    print(f"  Lean Ridge vs XGB Conservative: {lean_test_mape - XGB_CONSERVATIVE_TEST:+.3f}pp")
 
     summary = {
         'lean_test': lean_test_mape, 'lean_train': lean_train_mape,
-        'lean_cv': elbow_cv,          # CV MAPE at elbow (5-fold, per-fold re-encoding)
-        'lean_se': elbow_se,          # SE at elbow point
-        'alpha_tuning_cv': best_cv,   # CV MAPE from alpha grid search (different protocol)
+        'lean_cv': elbow_cv,
+        'lean_se': elbow_se,
+        'alpha_tuning_cv': best_cv,
         'lean_alpha': best_alpha,
         'lean_n': len(LEAN_FEATURES),
         'lean_features': LEAN_FEATURES,
         'candidate_n': len(CANDIDATE_FEATURES),
-        'xgb_conservative': XGB_CONSERVATIVE_TEST, 'xgb_early_stop': XGB_EARLY_STOP_TEST,
+        'xgb_conservative': XGB_CONSERVATIVE_TEST,
+        'xgb_early_stop':   XGB_EARLY_STOP_TEST,
+        'xgb_tuned':        XGB_TUNED_TEST,
     }
-    # Merge xgb_results.json if present (written by xgboost_benchmark.py)
-    # This carries xgb_all (per-config train/test/gap) into results.json so
-    # make_report.py only needs to open one file for all metrics.
+    # Merge xgb_results.json if present
     if os.path.exists('xgb_results.json'):
         with open('xgb_results.json') as f:
             _xgb_extra = json.load(f)
         summary['xgb_all']            = _xgb_extra.get('xgb_all', {})
+        summary['xgb_tuned_cv']       = _xgb_extra.get('xgb_tuned_cv', None)
+        summary['xgb_tuned_params']   = _xgb_extra.get('xgb_tuned_params', {})
         summary['xgboost_version']    = _xgb_extra.get('xgboost_version', 'unknown')
-        # Overwrite conservative/early_stop with the freshly computed values
         summary['xgb_conservative']   = _xgb_extra['xgb_conservative']
         summary['xgb_early_stop']     = _xgb_extra['xgb_early_stop']
+        summary['xgb_tuned']          = _xgb_extra.get('xgb_tuned', _xgb_extra['xgb_conservative'])
         print("  xgb_results.json merged — benchmark values are fully reproducible.")
     else:
         print("  xgb_results.json not found — using fallback XGB values.")
